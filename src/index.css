@@ -2,41 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+/* Synapse-Arbitrage Quantum Trading System Design System */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Quantum Theme - Dark Base */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    /* Quantum Blue Primary */
+    --primary: 217 91.2% 59.8%;
+    --primary-foreground: 240 10% 3.9%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    /* Neon Purple Secondary */
+    --secondary: 262 83% 58%;
+    --secondary-foreground: 0 0% 98%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    /* Crypto Green Accent */
+    --accent: 142 76% 36%;
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    /* Danger Red */
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 217 91.2% 59.8%;
 
-    --radius: 0.5rem;
+    --radius: 0.75rem;
+    
+    /* Quantum Gradients */
+    --gradient-quantum: linear-gradient(135deg, hsl(217 91.2% 59.8%) 0%, hsl(262 83% 58%) 100%);
+    --gradient-neural: linear-gradient(45deg, hsl(262 83% 58%) 0%, hsl(142 76% 36%) 100%);
+    --gradient-cyber: linear-gradient(180deg, hsl(240 10% 3.9%) 0%, hsl(240 3.7% 15.9%) 100%);
+    
+    /* Quantum Shadows */
+    --shadow-quantum: 0 0 30px hsl(217 91.2% 59.8% / 0.3);
+    --shadow-neural: 0 0 20px hsl(262 83% 58% / 0.2);
+    --shadow-glow: 0 4px 20px hsl(217 91.2% 59.8% / 0.1);
+    
+    /* Animation Timing */
+    --transition-quantum: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-neural: all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 
     --sidebar-background: 0 0% 98%;
 
@@ -101,5 +118,109 @@ All colors MUST be HSL.
 
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  /* Quantum Animations */
+  @keyframes quantum-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  @keyframes neural-glow {
+    0%, 100% { 
+      box-shadow: var(--shadow-quantum);
+      transform: scale(1);
+    }
+    50% { 
+      box-shadow: var(--shadow-neural);
+      transform: scale(1.02);
+    }
+  }
+
+  @keyframes data-flow {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--secondary));
+  }
+}
+
+@layer components {
+  /* Quantum Button Variants */
+  .btn-quantum {
+    @apply bg-gradient-to-r from-primary to-secondary text-primary-foreground;
+    @apply hover:shadow-[var(--shadow-quantum)] transition-[var(--transition-quantum)];
+    @apply border border-primary/20;
+  }
+
+  .btn-neural {
+    @apply bg-gradient-to-r from-secondary to-accent text-secondary-foreground;
+    @apply hover:shadow-[var(--shadow-neural)] transition-[var(--transition-neural)];
+    @apply border border-secondary/20;
+  }
+
+  .btn-cyber {
+    @apply bg-muted/50 backdrop-blur-sm text-foreground;
+    @apply hover:bg-muted transition-[var(--transition-quantum)];
+    @apply border border-border;
+  }
+
+  /* Glass Card Effect */
+  .glass-card {
+    @apply bg-card/80 backdrop-blur-md border border-border/50;
+    @apply shadow-[var(--shadow-glow)];
+  }
+
+  /* Quantum Text Effects */
+  .text-quantum {
+    @apply bg-gradient-to-r from-primary to-secondary bg-clip-text text-transparent;
+  }
+
+  .text-neural {
+    @apply bg-gradient-to-r from-secondary to-accent bg-clip-text text-transparent;
+  }
+
+  /* Status Indicators */
+  .status-active {
+    @apply relative;
+  }
+
+  .status-active::before {
+    @apply content-[''] absolute -inset-1 bg-gradient-to-r from-accent to-primary rounded-lg blur opacity-30;
+    animation: neural-glow 2s ease-in-out infinite;
+  }
+
+  /* Data Stream Effect */
+  .data-stream {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .data-stream::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, hsl(var(--primary)), transparent);
+    animation: data-flow 2s linear infinite;
   }
 }

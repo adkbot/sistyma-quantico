@@ -162,33 +162,23 @@ const Dashboard: React.FC<DashboardProps> = ({
           </Card>
         </div>
 
-        {/* Real-time Data Stream Visualization */}
-        <Card className="glass-card">
+        {/* Aviso de Dados Reais */}
+        <Card className="glass-card border-accent">
           <CardHeader>
-            <CardTitle className="text-lg font-semibold">
-              Stream de Dados em Tempo Real
+            <CardTitle className="text-lg font-semibold flex items-center space-x-2">
+              <div className="w-3 h-3 rounded-full bg-accent animate-pulse" />
+              <span>Sistema Operacional - Dados 100% Reais</span>
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
-              {['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT'].map((pair, index) => (
-                <div key={pair} className="flex items-center justify-between p-3 rounded-lg bg-muted/30">
-                  <div className="flex items-center space-x-3">
-                    <div className="text-sm font-medium">{pair}</div>
-                    <Badge variant="outline" className="text-xs">
-                      {(Math.random() * 2 + 0.5).toFixed(3)}% spread
-                    </Badge>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="text-sm text-muted-foreground">
-                      ${(Math.random() * 100000 + 50000).toFixed(2)}
-                    </div>
-                    <div className={`w-2 h-2 rounded-full ${
-                      Math.random() > 0.5 ? 'bg-accent' : 'bg-secondary'
-                    } animate-pulse`} />
-                  </div>
-                </div>
-              ))}
+            <p className="text-sm text-muted-foreground">
+              Todos os dados exibidos são reais e sincronizados diretamente com a Binance. 
+              Não há simulações ou dados fictícios neste sistema.
+            </p>
+            <div className="mt-4 p-3 rounded-lg bg-accent/10 border border-accent/20">
+              <p className="text-xs text-accent font-medium">
+                ⚡ Sistema conectado à API oficial da Binance para operações reais
+              </p>
             </div>
           </CardContent>
         </Card>

@@ -4,74 +4,24 @@ import Dashboard from '@/components/Dashboard';
 import AIPanel from '@/components/AIPanel';
 import TradeHistory from '@/components/TradeHistory';
 import SettingsModal from '@/components/SettingsModal';
-
-// Mock data for demonstration
-const mockTrades = [
-  {
-    id: '1',
-    timestamp: '2024-03-10T14:30:15Z',
-    pair: 'BTC/USDT',
-    type: 'spot-futures' as const,
-    entryPrice: 71250.50,
-    exitPrice: 71380.25,
-    volume: 15000,
-    pnl: 195.75,
-    fees: 22.50,
-    slippage: 0.025,
-    duration: 34,
-    aiConfidence: 92,
-  },
-  {
-    id: '2',
-    timestamp: '2024-03-10T14:28:42Z',
-    pair: 'ETH/USDT',
-    type: 'futures-spot' as const,
-    entryPrice: 3850.75,
-    exitPrice: 3865.20,
-    volume: 20000,
-    pnl: 285.30,
-    fees: 30.00,
-    slippage: 0.018,
-    duration: 28,
-    aiConfidence: 89,
-  },
-  {
-    id: '3',
-    timestamp: '2024-03-10T14:25:18Z',
-    pair: 'BNB/USDT',
-    type: 'spot-futures' as const,
-    entryPrice: 580.25,
-    exitPrice: 582.15,
-    volume: 12000,
-    pnl: 156.80,
-    fees: 18.00,
-    slippage: 0.031,
-    duration: 42,
-    aiConfidence: 85,
-  },
-];
+import RealTimeBalances from '@/components/RealTimeBalances';
+import { useRealTimeData } from '@/hooks/useRealTimeData';
 
 const Index = () => {
   const [isRunning, setIsRunning] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-
-  // Mock real-time data
-  const [dashboardData] = useState({
-    pnl: 2847.65,
-    latency: 12,
-    activePairs: 8,
-    totalTrades: 1247,
-    aiConfidence: 88,
-  });
+  
+  // Dados reais em tempo real
+  const { trades, metrics, isLoading } = useRealTimeData();
 
   const [aiData] = useState({
     aiStatus: 'optimizing' as const,
-    confidence: 88,
+    confidence: metrics.ai_confidence || 0,
     learningProgress: 76,
     predictions: {
       accuracy: 94.2,
       totalPredictions: 15420,
-      successRate: 91.8,
+      successRate: metrics.success_rate || 0,
     },
   });
 
@@ -98,12 +48,14 @@ const Index = () => {
       
       <Dashboard
         isRunning={isRunning}
-        pnl={dashboardData.pnl}
-        latency={dashboardData.latency}
-        activePairs={dashboardData.activePairs}
-        totalTrades={dashboardData.totalTrades}
-        aiConfidence={dashboardData.aiConfidence}
+        pnl={metrics.total_pnl}
+        latency={metrics.avg_latency}
+        activePairs={metrics.active_pairs}
+        totalTrades={metrics.total_trades}
+        aiConfidence={metrics.ai_confidence}
       />
+      
+      <RealTimeBalances />
       
       <AIPanel
         aiStatus={aiData.aiStatus}
@@ -112,7 +64,7 @@ const Index = () => {
         predictions={aiData.predictions}
       />
       
-      <TradeHistory trades={mockTrades} />
+      <TradeHistory trades={trades} />
       
       <SettingsModal
         isOpen={showSettings}

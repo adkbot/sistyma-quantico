@@ -1,10 +1,5 @@
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  import.meta.env.VITE_SUPABASE_URL!,
-  import.meta.env.VITE_SUPABASE_ANON_KEY!
-);
+import { supabase } from '@/integrations/supabase/client';
 
 interface RealTimeBalance {
   asset: string;
@@ -57,7 +52,14 @@ export const useRealTimeData = () => {
   const fetchRealBalances = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        // Dados de exemplo para usuários não autenticados
+        setBalances([
+          { asset: 'USDT', spot_balance: 5000, futures_balance: 3000, total_balance: 8000 },
+          { asset: 'BTC', spot_balance: 0.25, futures_balance: 0.15, total_balance: 0.4 },
+        ]);
+        return;
+      }
 
       const { data, error } = await supabase
         .from('account_balances')
@@ -96,7 +98,26 @@ export const useRealTimeData = () => {
   const fetchRealTrades = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        // Dados de exemplo para usuários não autenticados
+        setTrades([
+          {
+            id: 'demo-1',
+            timestamp: new Date().toISOString(),
+            pair: 'BTCUSDT',
+            type: 'spot-futures',
+            entryPrice: 43250,
+            exitPrice: 43280,
+            volume: 0.1,
+            pnl: 3.0,
+            fees: 0.5,
+            slippage: 0.02,
+            duration: 245,
+            aiConfidence: 94.2
+          }
+        ]);
+        return;
+      }
 
       const { data, error } = await supabase
         .from('trades')
@@ -134,7 +155,19 @@ export const useRealTimeData = () => {
   const calculateRealMetrics = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        // Dados de exemplo para usuários não autenticados
+        setMetrics({
+          total_pnl: 1250.75,
+          daily_pnl: 85.30,
+          total_trades: 147,
+          success_rate: 89.2,
+          avg_latency: 12.5,
+          active_pairs: 8,
+          ai_confidence: 94.2
+        });
+        return;
+      }
 
       // Buscar trades do usuário
       const { data: allTrades } = await supabase

@@ -20,17 +20,18 @@ const HeroSection: React.FC<HeroSectionProps> = ({
       {/* Background Video */}
       <div className="absolute inset-0 z-0">
         <video
+          width="100%"
+          height="100%"
           autoPlay
           muted
           loop
           playsInline
-          className="w-full h-full object-cover opacity-30"
+          style={{objectFit: 'cover', position: 'absolute', top: 0, left: 0, zIndex: -1}}
         >
-          <source
-            src="https://cdn.midjourney.com/video/2185e-0a52-49a5-8911-26423e19da5b/0.mp4"
-            type="video/mp4"
-          />
+          <source src="URL_DO_SEU_VIDEO.mp4" type="video/mp4" />
+          Seu navegador não suporta a tag de vídeo.
         </video>
+        {/* Faça o upload do seu vídeo para um serviço de hospedagem e substitua URL_DO_SEU_VIDEO.mp4 */}
         <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90" />
       </div>
 

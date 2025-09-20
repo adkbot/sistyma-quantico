@@ -26,17 +26,17 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           muted
           loop
           playsInline
-          style={{objectFit: 'cover', position: 'absolute', top: 0, left: 0, zIndex: -1}}
+          style={{objectFit: 'cover', position: 'absolute', top: 0, left: 0, zIndex: 1}}
         >
           <source src="/hero-video.mp4" type="video/mp4" />
           Seu navegador não suporta a tag de vídeo.
         </video>
-        {/* Faça o upload do seu vídeo para um serviço de hospedagem e substitua URL_DO_SEU_VIDEO.mp4 */}
-        <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background/90" />
+        {/* Overlay mais sutil para manter o vídeo visível */}
+        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/20 to-black/40 z-10" />
       </div>
 
       {/* Content */}
-      <div className="relative z-10 text-center max-w-6xl mx-auto px-6">
+      <div className="relative z-20 text-center max-w-6xl mx-auto px-6">
         <div className="mb-8">
           <h1 className="text-6xl md:text-8xl font-bold mb-6 text-quantum">
             SYNAPSE

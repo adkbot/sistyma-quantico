@@ -12,11 +12,53 @@ class BinanceConnector {
   private apiKey: string
   private secretKey: string
   private baseUrl = 'https://api.binance.com'
+  private isConnected: boolean = false
+  private connectionStatus: string = 'disconnected'
   
   constructor(supabaseUrl: string, supabaseKey: string, apiKey: string, secretKey: string) {
     this.supabase = createClient(supabaseUrl, supabaseKey)
     this.apiKey = apiKey
     this.secretKey = secretKey
+  }
+
+  async validateConnection(): Promise<boolean> {
+    try {
+      const timestamp = Date.now()
+      const queryString = `timestamp=${timestamp}`
+      const signature = await this.createSignature(queryString)
+      
+      const response = await fetch(`${this.baseUrl}/api/v3/account?${queryString}&signature=${signature}`, {
+        method: 'GET',
+        headers: {
+          'X-MBX-APIKEY': this.apiKey,
+          'Content-Type': 'application/json'
+        }
+      })
+
+      if (response.ok) {
+        this.isConnected = true
+        this.connectionStatus = 'connected'
+        console.log('Conexão Binance validada com sucesso')
+        return true
+      } else {
+        this.isConnected = false
+        this.connectionStatus = 'error'
+        console.error('Erro na validação Binance:', await response.text())
+        return false
+      }
+    } catch (error) {
+      this.isConnected = false
+      this.connectionStatus = 'error'
+      console.error('Erro na conexão Binance:', error)
+      return false
+    }
+  }
+
+  getConnectionStatus(): { connected: boolean; status: string } {
+    return {
+      connected: this.isConnected,
+      status: this.connectionStatus
+    }
   }
 
   private async createSignature(queryString: string): Promise<string> {
@@ -204,15 +246,37 @@ serve(async (req) => {
       const { action, ...params } = await req.json()
       
       switch (action) {
+        case 'validate_connection':
+          const isValid = await connector.validateConnection()
+          const status = connector.getConnectionStatus()
+          return new Response(JSON.stringify({ 
+            success: true, 
+            valid: isValid,
+            status 
+          }), {
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          })
+
         case 'get_balances':
+          const isConnected = await connector.validateConnection()
+          if (!isConnected) {
+            return new Response(JSON.stringify({ 
+              success: false, 
+              error: 'Binance connection failed. Check API keys and network.' 
+            }), {
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              status: 400
+            })
+          }
+          
           const balances = await connector.getAccountBalances()
-          return new Response(JSON.stringify({ balances }), {
+          return new Response(JSON.stringify({ success: true, balances }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           })
           
         case 'get_orderbook':
           const orderbook = await connector.getOrderBook(params.symbol)
-          return new Response(JSON.stringify({ orderbook }), {
+          return new Response(JSON.stringify({ success: true, orderbook }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           })
           
@@ -224,13 +288,13 @@ serve(async (req) => {
             params.quantity,
             params.price
           )
-          return new Response(JSON.stringify({ order }), {
+          return new Response(JSON.stringify({ success: true, order }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           })
           
         case 'sync_balances':
           await connector.syncBalances()
-          return new Response(JSON.stringify({ success: true }), {
+          return new Response(JSON.stringify({ success: true, message: 'Balances synced' }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' }
           })
           

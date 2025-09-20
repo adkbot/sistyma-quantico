@@ -5,6 +5,7 @@ import AIPanel from '@/components/AIPanel';
 import TradeHistory from '@/components/TradeHistory';
 import SettingsModal from '@/components/SettingsModal';
 import RealTimeBalances from '@/components/RealTimeBalances';
+import SystemStatusPanel from '@/components/SystemStatusPanel';
 import { useRealTimeData } from '@/hooks/useRealTimeData';
 
 const Index = () => {
@@ -54,6 +55,10 @@ const Index = () => {
         totalTrades={metrics.total_trades}
         aiConfidence={metrics.ai_confidence}
       />
+      
+      <div className="container mx-auto px-6 py-8">
+        <SystemStatusPanel />
+      </div>
       
       <RealTimeBalances />
       

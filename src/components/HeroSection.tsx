@@ -28,7 +28,7 @@ const HeroSection: React.FC<HeroSectionProps> = ({
           playsInline
           style={{objectFit: 'cover', position: 'absolute', top: 0, left: 0, zIndex: -1}}
         >
-          <source src="URL_DO_SEU_VIDEO.mp4" type="video/mp4" />
+          <source src="/hero-video.mp4" type="video/mp4" />
           Seu navegador não suporta a tag de vídeo.
         </video>
         {/* Faça o upload do seu vídeo para um serviço de hospedagem e substitua URL_DO_SEU_VIDEO.mp4 */}

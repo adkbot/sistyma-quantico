@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { supabase } from '@/integrations/supabase/client';
+import { backendClient } from '@/lib/backendClient';
 import { 
   CheckCircle, 
   XCircle, 
@@ -27,11 +27,15 @@ interface SystemStatus {
   connectivity: boolean;
 }
 
-const SystemStatusPanel = () => {
+interface SystemStatusPanelProps {
+  isRunning: boolean;
+}
+
+const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isRunning }) => {
   const [status, setStatus] = useState<SystemStatus>({
     binanceConnection: 'disconnected',
     regionalStatus: 'full',
-    websocketStatus: 'disconnected',
+    websocketStatus: isRunning ? 'connected' : 'disconnected',
     apiKeys: 'missing',
     region: 'Detectando...',
     restrictions: [],
@@ -41,59 +45,35 @@ const SystemStatusPanel = () => {
 
   const checkSystemStatus = async () => {
     setIsChecking(true);
-    
+
     try {
-      // 1. Verificar região e compatibilidade
-      const regionalCheck = await supabase.functions.invoke('regional-validator', {
-        body: { action: 'detect_region' }
+      const { status: backendStatus } = await backendClient.getSystemStatus();
+
+      setStatus({
+        binanceConnection: backendStatus.binanceConnection,
+        regionalStatus: backendStatus.regionalStatus,
+        websocketStatus: isRunning ? 'connected' : backendStatus.websocketStatus,
+        apiKeys: backendStatus.apiKeys,
+        region: backendStatus.region,
+        restrictions: backendStatus.restrictions,
+        connectivity: backendStatus.connectivity
       });
-
-      if (regionalCheck.data?.success) {
-        const report = regionalCheck.data.report;
-        setStatus(prev => ({
-          ...prev,
-          region: report.region,
-          regionalStatus: report.compatibility.status,
-          restrictions: report.configuration.restrictions,
-          connectivity: report.configuration.connectivity
-        }));
-      }
-
-      // 2. Verificar conexão Binance
-      const binanceCheck = await supabase.functions.invoke('binance-connector', {
-        body: { action: 'validate_connection' }
-      });
-
-      if (binanceCheck.data?.success) {
-        setStatus(prev => ({
-          ...prev,
-          binanceConnection: binanceCheck.data.valid ? 'connected' : 'error',
-          apiKeys: binanceCheck.data.valid ? 'configured' : 'invalid'
-        }));
-      } else {
-        setStatus(prev => ({
-          ...prev,
-          binanceConnection: 'error',
-          apiKeys: 'missing'
-        }));
-      }
-
-      // 3. Verificar WebSocket (simulado por agora)
-      setStatus(prev => ({
-        ...prev,
-        websocketStatus: 'connected'
-      }));
-
     } catch (error) {
       console.error('Erro ao verificar status do sistema:', error);
+      setStatus((prev) => ({
+        ...prev,
+        binanceConnection: 'error',
+        apiKeys: 'missing',
+        websocketStatus: 'disconnected'
+      }));
     } finally {
       setIsChecking(false);
     }
   };
 
-  useEffect(() => {
+    useEffect(() => {
     checkSystemStatus();
-  }, []);
+  }, [isRunning]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {

@@ -22,14 +22,13 @@ CREATE TABLE api_configurations (
 CREATE TABLE account_balances (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  exchange_name TEXT NOT NULL,
-  account_type TEXT NOT NULL, -- 'spot' ou 'futures'
-  asset TEXT NOT NULL, -- 'USDT', 'BTC', etc.
-  total_balance DECIMAL(20,8) NOT NULL DEFAULT 0,
-  available_balance DECIMAL(20,8) NOT NULL DEFAULT 0,
-  locked_balance DECIMAL(20,8) NOT NULL DEFAULT 0,
-  last_sync TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user_id, exchange_name, account_type, asset)
+  asset TEXT NOT NULL,
+  spot_balance NUMERIC(30, 12) DEFAULT 0,
+  futures_balance NUMERIC(30, 12) DEFAULT 0,
+  total_balance NUMERIC(30, 12) DEFAULT 0,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE (user_id, asset)
 );
 
 -- ========================================
@@ -53,55 +52,20 @@ CREATE TABLE trading_pairs (
 CREATE TABLE trades (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
-  pair_id UUID REFERENCES trading_pairs(id),
-  trade_type TEXT NOT NULL DEFAULT 'arbitrage_spot_futures',
-  
-  -- Timing
-  entry_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-  exit_timestamp TIMESTAMP WITH TIME ZONE,
-  duration_seconds INTEGER,
-  
-  -- OPERAÇÃO SPOT
-  spot_order_id TEXT NOT NULL,
-  spot_side TEXT NOT NULL, -- 'buy' ou 'sell'
-  spot_price DECIMAL(20,8) NOT NULL,
-  spot_quantity DECIMAL(20,8) NOT NULL,
-  spot_fee DECIMAL(20,8) NOT NULL DEFAULT 0,
-  spot_executed_qty DECIMAL(20,8) NOT NULL,
-  
-  -- OPERAÇÃO FUTUROS
-  futures_order_id TEXT NOT NULL,
-  futures_side TEXT NOT NULL, -- 'buy' ou 'sell'
-  futures_price DECIMAL(20,8) NOT NULL,
-  futures_quantity DECIMAL(20,8) NOT NULL,
-  futures_fee DECIMAL(20,8) NOT NULL DEFAULT 0,
-  futures_executed_qty DECIMAL(20,8) NOT NULL,
-  
-  -- RESULTADOS FINANCEIROS REAIS
-  gross_spread_percentage DECIMAL(8,6) NOT NULL,
-  predicted_slippage DECIMAL(8,6) NOT NULL,
-  actual_slippage DECIMAL(8,6) NOT NULL,
-  net_pnl_usdt DECIMAL(20,8) NOT NULL,
-  total_fees_usdt DECIMAL(20,8) NOT NULL,
-  roi_percentage DECIMAL(8,6) NOT NULL,
-  
-  -- DADOS IA/ML
-  ai_confidence_score DECIMAL(5,4), -- 0-1
-  wyckoff_phase TEXT, -- 'accumulation_phase_c', 'markup', etc.
-  gex_value DECIMAL(20,8),
-  market_regime TEXT, -- 'trending', 'ranging', 'volatile'
-  
-  -- MÉTRICAS DE EXECUÇÃO
-  entry_latency_ms INTEGER NOT NULL,
-  exit_latency_ms INTEGER,
-  execution_quality_score DECIMAL(5,4), -- 0-1
-  
-  -- STATUS
-  status TEXT NOT NULL DEFAULT 'open', -- 'open', 'closed', 'partial', 'error'
-  error_message TEXT,
-  
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  exchange TEXT,
+  pair TEXT NOT NULL,
+  side TEXT NOT NULL,
+  price NUMERIC(30, 12) NOT NULL,
+  quantity NUMERIC(30, 12) NOT NULL,
+  pnl NUMERIC(30, 12),
+  fees NUMERIC(30, 12),
+  slippage NUMERIC(30, 12),
+  entry_price NUMERIC(30, 12),
+  exit_price NUMERIC(30, 12),
+  execution_time_ms INTEGER,
+  status TEXT,
+  ai_confidence NUMERIC(10, 4),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- ========================================
@@ -251,27 +215,12 @@ CREATE TABLE system_logs (
 CREATE TABLE market_data_cache (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   symbol TEXT NOT NULL,
-  exchange TEXT NOT NULL,
-  market_type TEXT NOT NULL, -- 'spot' ou 'futures'
-  
-  -- PREÇOS E VOLUMES
-  bid_price DECIMAL(20,8) NOT NULL,
-  ask_price DECIMAL(20,8) NOT NULL,
-  bid_quantity DECIMAL(20,8) NOT NULL,
-  ask_quantity DECIMAL(20,8) NOT NULL,
-  last_price DECIMAL(20,8),
-  
-  -- MÉTRICAS DERIVADAS
-  spread_percentage DECIMAL(8,6) NOT NULL,
-  mid_price DECIMAL(20,8) NOT NULL,
-  liquidity_score DECIMAL(5,4), -- 0-1
-  
-  -- TIMESTAMP
-  data_timestamp TIMESTAMP WITH TIME ZONE NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  
-  -- Para performance, manter apenas dados recentes
-  UNIQUE(symbol, exchange, market_type)
+  bid_price NUMERIC(30, 12),
+  ask_price NUMERIC(30, 12),
+  spread NUMERIC(30, 12),
+  volume_24h NUMERIC(30, 12),
+  source TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
 -- ========================================
@@ -502,3 +451,5 @@ ORDER BY detected_at DESC;
 -- 8. Performance otimizada com índices
 -- 9. Segurança com RLS
 -- 10. Análises rápidas com views
+
+

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,18 +10,32 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Key, Settings, Shield, Zap, Brain, AlertTriangle } from "lucide-react";
+import { backendClient } from "@/lib/backendClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
 
+interface ApiKeyState {
+  binanceKey: string;
+  binanceSecret: string;
+  testnet: boolean;
+  configured: boolean;
+}
+
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
-  const [apiKeys, setApiKeys] = useState({
-    binanceKey: '',
-    binanceSecret: '',
-    laevitasKey: '',
+  const { toast } = useToast();
+  const [apiKeys, setApiKeys] = useState<ApiKeyState>({
+    binanceKey: "",
+    binanceSecret: "",
+    testnet: false,
+    configured: false,
   });
+  const [loadingKeys, setLoadingKeys] = useState(false);
+  const [savingKeys, setSavingKeys] = useState(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const [tradingParams, setTradingParams] = useState({
     minSpread: 0.15,
@@ -43,10 +57,109 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
     emergencyStop: true,
   });
 
-  const handleSave = () => {
-    // Here you would typically save to localStorage or send to backend
-    console.log('Saving settings:', { apiKeys, tradingParams, aiSettings, riskSettings });
-    onClose();
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    let isMounted = true;
+    setLoadingKeys(true);
+    setApiError(null);
+
+    backendClient
+      .getSettings()
+      .then((settings) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setApiKeys((prev) => ({
+          ...prev,
+          configured: settings.apiKeys.configured,
+          testnet: settings.apiKeys.testnet,
+          binanceKey: '',
+          binanceSecret: '',
+        }));
+
+        setTradingParams(settings.tradingParams);
+        setAiSettings(settings.aiSettings);
+        setRiskSettings(settings.riskSettings);
+      })
+      .catch((err: unknown) => {
+        if (!isMounted) {
+          return;
+        }
+        setApiError((err as Error)?.message ?? 'Erro ao carregar configuraÁıes.');
+      })
+      .finally(() => {
+        if (isMounted) {
+          setLoadingKeys(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handler = setTimeout(() => {
+      backendClient
+        .updateSettings({
+          tradingParams,
+          aiSettings,
+          riskSettings,
+        })
+        .catch((err) => {
+          console.error('Erro ao salvar configuraÁıes', err);
+        });
+    }, 500);
+
+    return () => clearTimeout(handler);
+  }, [aiSettings, riskSettings, tradingParams, isOpen]);
+
+  const handleSaveKeys = async () => {
+    setApiError(null);
+    if (!apiKeys.binanceKey || !apiKeys.binanceSecret) {
+      setApiError('Informe sua API Key e Secret Key da Binance.');
+      return;
+    }
+
+    setSavingKeys(true);
+    try {
+      const settings = await backendClient.manageApiKeys('save', {
+        apiKey: apiKeys.binanceKey,
+        apiSecret: apiKeys.binanceSecret,
+        testnet: apiKeys.testnet,
+      });
+
+      toast({
+        title: 'Chaves atualizadas',
+        description: 'IntegraÁ„o com a Binance configurada com sucesso.',
+      });
+
+      setApiKeys((prev) => ({
+        ...prev,
+        configured: settings.apiKeys.configured,
+        testnet: settings.apiKeys.testnet,
+        binanceKey: '',
+        binanceSecret: '',
+      }));
+    } catch (err) {
+      const message = (err as Error)?.message ?? 'Erro inesperado ao salvar chaves.';
+      setApiError(message);
+      toast({
+        title: 'Erro ao salvar chaves',
+        description: message,
+        variant: 'destructive',
+      });
+    } finally {
+      setSavingKeys(false);
+    }
   };
 
   return (
@@ -55,7 +168,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-quantum flex items-center">
             <Settings className="mr-2 h-6 w-6" />
-            Configura√ß√µes do Sistema
+            ConfiguraÁıes do Sistema
           </DialogTitle>
         </DialogHeader>
 
@@ -91,9 +204,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription>
-                    Suas chaves de API s√£o armazenadas localmente e criptografadas. Nunca compartilhe essas informa√ß√µes.
+                    Armazenamos suas chaves da Binance localmente no servidor (.env). Elas s„o usadas apenas para sincronizar
+                    saldos e enviar ordens autorizadas por vocÍ.
                   </AlertDescription>
                 </Alert>
+
+                {apiError && (
+                  <Alert className="border-destructive text-destructive">
+                    <AlertDescription>{apiError}</AlertDescription>
+                  </Alert>
+                )}
 
                 <div className="space-y-4">
                   <div>
@@ -101,34 +221,38 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     <Input
                       id="binance-key"
                       type="password"
-                      placeholder="Sua chave da API Binance"
+                      placeholder={apiKeys.configured ? "Chave configurada" : "Sua chave da API Binance"}
                       value={apiKeys.binanceKey}
-                      onChange={(e) => setApiKeys(prev => ({ ...prev, binanceKey: e.target.value }))}
-                      className="font-mono"
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="binance-secret">Binance Secret Key</Label>
-                    <Input
-                      id="binance-secret"
-                      type="password"
-                      placeholder="Sua chave secreta da Binance"
-                      value={apiKeys.binanceSecret}
-                      onChange={(e) => setApiKeys(prev => ({ ...prev, binanceSecret: e.target.value }))}
+                      onChange={(e) => setApiKeys((prev) => ({ ...prev, binanceKey: e.target.value }))}
+                      disabled={loadingKeys || savingKeys}
                       className="font-mono"
                     />
                   </div>
 
                   <div>
-                    <Label htmlFor="laevitas-key">Laevitas API Key</Label>
+                    <Label htmlFor="binance-secret">Binance Secret Key</Label>
                     <Input
-                      id="laevitas-key"
+                      id="binance-secret"
                       type="password"
-                      placeholder="Sua chave da API Laevitas (GEX)"
-                      value={apiKeys.laevitasKey}
-                      onChange={(e) => setApiKeys(prev => ({ ...prev, laevitasKey: e.target.value }))}
+                      placeholder={apiKeys.configured ? "Chave secreta armazenada" : "Sua chave secreta da Binance"}
+                      value={apiKeys.binanceSecret}
+                      onChange={(e) => setApiKeys((prev) => ({ ...prev, binanceSecret: e.target.value }))}
+                      disabled={loadingKeys || savingKeys}
                       className="font-mono"
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-md border p-4">
+                    <div>
+                      <p className="font-medium">Modo Testnet</p>
+                      <p className="text-sm text-muted-foreground">
+                        Ative para operar na Binance Testnet. Desative para operar com saldo real.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={apiKeys.testnet}
+                      disabled={loadingKeys || savingKeys}
+                      onCheckedChange={(checked) => setApiKeys((prev) => ({ ...prev, testnet: checked }))}
                     />
                   </div>
                 </div>
@@ -136,11 +260,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 <div className="flex items-center space-x-2 pt-4">
                   <Badge variant="outline" className="text-accent">
                     <div className="w-2 h-2 rounded-full bg-accent mr-2" />
-                    Conex√£o Segura
+                    {apiKeys.configured ? "Binance conectada" : "Conex„o pendente"}
                   </Badge>
-                  <Badge variant="outline">
-                    Criptografia AES-256
-                  </Badge>
+                  <Badge variant="outline">ProteÁ„o via controle de acesso local</Badge>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-6">
+                  <Button
+                    variant="outline"
+                    onClick={onClose}
+                    disabled={savingKeys}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleSaveKeys}
+                    disabled={savingKeys || loadingKeys}
+                  >
+                    {savingKeys ? "Salvando..." : "Salvar"}
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -151,35 +289,35 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Zap className="mr-2 h-5 w-5 text-secondary" />
-                  Par√¢metros de Trading
+                  Par‚metros de Trading
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <Label htmlFor="min-spread">Spread M√≠nimo (%)</Label>
+                    <Label htmlFor="min-spread">Spread MÌnimo (%)</Label>
                     <Input
                       id="min-spread"
                       type="number"
                       step="0.01"
                       value={tradingParams.minSpread}
-                      onChange={(e) => setTradingParams(prev => ({ ...prev, minSpread: parseFloat(e.target.value) }))}
+                      onChange={(e) => setTradingParams((prev) => ({ ...prev, minSpread: parseFloat(e.target.value) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Spread m√≠nimo para considerar uma opera√ß√£o
+                      Spread mÌnimo para considerar uma operaÁ„o.
                     </p>
                   </div>
 
                   <div>
-                    <Label htmlFor="max-position">Posi√ß√£o M√°xima (USD)</Label>
+                    <Label htmlFor="max-position">PosiÁ„o M·xima (USD)</Label>
                     <Input
                       id="max-position"
                       type="number"
                       value={tradingParams.maxPosition}
-                      onChange={(e) => setTradingParams(prev => ({ ...prev, maxPosition: parseInt(e.target.value) }))}
+                      onChange={(e) => setTradingParams((prev) => ({ ...prev, maxPosition: parseInt(e.target.value || "0", 10) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Valor m√°ximo por opera√ß√£o
+                      Valor m·ximo por operaÁ„o.
                     </p>
                   </div>
 
@@ -190,23 +328,23 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                       type="number"
                       step="0.1"
                       value={tradingParams.stopLoss}
-                      onChange={(e) => setTradingParams(prev => ({ ...prev, stopLoss: parseFloat(e.target.value) }))}
+                      onChange={(e) => setTradingParams((prev) => ({ ...prev, stopLoss: parseFloat(e.target.value) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Perda m√°xima por opera√ß√£o
+                      Perda m·xima aceit·vel por operaÁ„o.
                     </p>
                   </div>
 
                   <div>
-                    <Label htmlFor="timeout">Timeout (segundos)</Label>
+                    <Label htmlFor="timeout">Timeout de PosiÁ„o (s)</Label>
                     <Input
                       id="timeout"
                       type="number"
                       value={tradingParams.timeout}
-                      onChange={(e) => setTradingParams(prev => ({ ...prev, timeout: parseInt(e.target.value) }))}
+                      onChange={(e) => setTradingParams((prev) => ({ ...prev, timeout: parseInt(e.target.value || "0", 10) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Tempo m√°ximo para manter posi√ß√£o
+                      Tempo m·ximo de exposiÁ„o por operaÁ„o.
                     </p>
                   </div>
                 </div>
@@ -218,62 +356,58 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             <Card className="glass-card">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Brain className="mr-2 h-5 w-5 text-accent" />
-                  Configura√ß√µes de IA
+                  <Brain className="mr-2 h-5 w-5 text-primary" />
+                  Par‚metros de IA
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
+              <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <Label>Habilitar IA</Label>
+                    <p className="font-medium">IA Ativa</p>
                     <p className="text-sm text-muted-foreground">
-                      Usar aprendizado de m√°quina para decis√µes
+                      Permite que o motor de IA ajuste dinamicamente estratÈgias.
                     </p>
                   </div>
                   <Switch
                     checked={aiSettings.enabled}
-                    onCheckedChange={(checked) => setAiSettings(prev => ({ ...prev, enabled: checked }))}
+                    onCheckedChange={(checked) => setAiSettings((prev) => ({ ...prev, enabled: checked }))}
                   />
                 </div>
 
                 <Separator />
 
-                <div className="grid grid-cols-2 gap-6">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="learning-rate">Taxa de Aprendizado</Label>
+                    <Label htmlFor="learning-rate">Learning Rate</Label>
                     <Input
                       id="learning-rate"
                       type="number"
                       step="0.001"
                       value={aiSettings.learningRate}
-                      onChange={(e) => setAiSettings(prev => ({ ...prev, learningRate: parseFloat(e.target.value) }))}
-                      disabled={!aiSettings.enabled}
+                      onChange={(e) => setAiSettings((prev) => ({ ...prev, learningRate: parseFloat(e.target.value) }))}
                     />
                   </div>
-
                   <div>
-                    <Label htmlFor="confidence">Confian√ßa M√≠nima (%)</Label>
+                    <Label htmlFor="confidence">ConfianÁa mÌnima (%)</Label>
                     <Input
                       id="confidence"
                       type="number"
                       value={aiSettings.confidence}
-                      onChange={(e) => setAiSettings(prev => ({ ...prev, confidence: parseInt(e.target.value) }))}
-                      disabled={!aiSettings.enabled}
+                      onChange={(e) => setAiSettings((prev) => ({ ...prev, confidence: parseInt(e.target.value || "0", 10) }))}
                     />
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between rounded-md border p-4">
                   <div>
-                    <Label>Re-treinamento Autom√°tico</Label>
+                    <p className="font-medium">Re-treinamento autom·tico</p>
                     <p className="text-sm text-muted-foreground">
-                      Atualizar modelo automaticamente
+                      Atualiza o modelo sempre que novos dados suficientes forem coletados.
                     </p>
                   </div>
                   <Switch
                     checked={aiSettings.retraining}
-                    onCheckedChange={(checked) => setAiSettings(prev => ({ ...prev, retraining: checked }))}
-                    disabled={!aiSettings.enabled}
+                    onCheckedChange={(checked) => setAiSettings((prev) => ({ ...prev, retraining: checked }))}
                   />
                 </div>
               </CardContent>
@@ -284,68 +418,56 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             <Card className="glass-card">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Shield className="mr-2 h-5 w-5 text-destructive" />
-                  Gest√£o de Risco
+                  <Shield className="mr-2 h-5 w-5 text-secondary" />
+                  Gest„o de Risco
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <Alert>
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertDescription>
-                    Configura√ß√µes de seguran√ßa para proteger seu capital.
-                  </AlertDescription>
-                </Alert>
-
-                <div className="grid grid-cols-2 gap-6">
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="max-daily-loss">Perda M√°xima Di√°ria (USD)</Label>
+                    <Label htmlFor="max-daily-loss">Perda di·ria m·xima (USD)</Label>
                     <Input
                       id="max-daily-loss"
                       type="number"
                       value={riskSettings.maxDailyLoss}
-                      onChange={(e) => setRiskSettings(prev => ({ ...prev, maxDailyLoss: parseInt(e.target.value) }))}
+                      onChange={(e) => setRiskSettings((prev) => ({ ...prev, maxDailyLoss: parseInt(e.target.value || "0", 10) }))}
                     />
                   </div>
-
                   <div>
-                    <Label htmlFor="max-concurrent">Trades Simult√¢neos M√°ximo</Label>
+                    <Label htmlFor="max-concurrent">Trades simult‚neos</Label>
                     <Input
                       id="max-concurrent"
                       type="number"
                       value={riskSettings.maxConcurrentTrades}
-                      onChange={(e) => setRiskSettings(prev => ({ ...prev, maxConcurrentTrades: parseInt(e.target.value) }))}
+                      onChange={(e) => setRiskSettings((prev) => ({ ...prev, maxConcurrentTrades: parseInt(e.target.value || "0", 10) }))}
                     />
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between">
+                <Separator />
+
+                <div className="flex items-center justify-between rounded-md border p-4">
                   <div>
-                    <Label>Parada de Emerg√™ncia</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Parar automaticamente em situa√ß√µes extremas
-                    </p>
+                    <p className="font-medium">EmergÍncia</p>
+                    <p className="text-sm text-muted-foreground">Desativa o sistema se os limites forem violados.</p>
                   </div>
                   <Switch
                     checked={riskSettings.emergencyStop}
-                    onCheckedChange={(checked) => setRiskSettings(prev => ({ ...prev, emergencyStop: checked }))}
+                    onCheckedChange={(checked) => setRiskSettings((prev) => ({ ...prev, emergencyStop: checked }))}
                   />
                 </div>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
-
-        <div className="flex justify-end space-x-4 pt-6">
-          <Button variant="outline" onClick={onClose}>
-            Cancelar
-          </Button>
-          <Button onClick={handleSave} className="btn-quantum">
-            Salvar Configura√ß√µes
-          </Button>
-        </div>
       </DialogContent>
     </Dialog>
   );
 };
 
 export default SettingsModal;
+
+
+
+
+

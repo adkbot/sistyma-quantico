@@ -1,0 +1,6 @@
+{
+  "tradingPair": "BTCUSDT",
+  "minProfitPercentage": 0.05,
+  "exchangeFeePercentage": 0.001,
+  "checkIntervalSeconds": 5
+}

@@ -3,45 +3,56 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Wallet, RefreshCw, TrendingUp, DollarSign } from "lucide-react";
-import { useRealTimeData } from '@/hooks/useRealTimeData';
 
-const RealTimeBalances: React.FC = () => {
-  const { balances, isLoading, error, syncWithBinance } = useRealTimeData();
+type RealTimeBalance = {
+  asset: string;
+  spot_balance: number;
+  futures_balance: number;
+  total_balance: number;
+};
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
+type RealTimeBalancesProps = {
+  balances: RealTimeBalance[];
+  isLoading: boolean;
+  error: string | null;
+  onSync: () => void | Promise<void>;
+};
+
+const RealTimeBalances: React.FC<RealTimeBalancesProps> = ({ balances, isLoading, error, onSync }) => {
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat('pt-BR', {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: 2,
     }).format(value);
-  };
 
   const formatCrypto = (value: number, asset: string) => {
     const decimals = ['BTC', 'ETH'].includes(asset) ? 6 : 2;
     return `${value.toFixed(decimals)} ${asset}`;
   };
 
-  const getTotalBalanceUSD = () => {
-    // Aqui você pode implementar conversão para USD usando preços atuais
-    // Por enquanto, assumindo que os valores já estão em USD para USDT
-    return balances
-      .filter(b => b.asset === 'USDT')
+  const getTotalBalanceUSD = () =>
+    balances
+      .filter((balance) => balance.asset === 'USDT')
       .reduce((sum, balance) => sum + balance.total_balance, 0);
-  };
 
   if (error) {
     return (
-      <Card className="glass-card border-destructive">
-        <CardContent className="p-6">
-          <div className="text-center text-destructive">
-            <p>Erro ao carregar saldos: {error}</p>
-            <Button onClick={syncWithBinance} className="mt-4">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Tentar Novamente
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <section className="py-8 px-6">
+        <div className="max-w-7xl mx-auto">
+          <Card className="glass-card border-destructive">
+            <CardContent className="p-6">
+              <div className="text-center text-destructive space-y-3">
+                <p>Erro ao carregar saldos: {error}</p>
+                <Button onClick={onSync} disabled={isLoading}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  Tentar novamente
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </section>
     );
   }
 
@@ -51,12 +62,10 @@ const RealTimeBalances: React.FC = () => {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h3 className="text-2xl font-bold text-quantum">Saldos da Carteira</h3>
-            <p className="text-sm text-muted-foreground">
-              Saldos reais sincronizados com a Binance
-            </p>
+            <p className="text-sm text-muted-foreground">Saldos reais sincronizados com a Binance</p>
           </div>
-          <Button 
-            onClick={syncWithBinance} 
+          <Button
+            onClick={onSync}
             disabled={isLoading}
             variant="outline"
             size="sm"
@@ -66,7 +75,6 @@ const RealTimeBalances: React.FC = () => {
           </Button>
         </div>
 
-        {/* Resumo Total */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <Card className="glass-card">
             <CardContent className="p-6">
@@ -87,9 +95,7 @@ const RealTimeBalances: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Ativos Ativos</p>
-                  <p className="text-2xl font-bold">
-                    {balances.length}
-                  </p>
+                  <p className="text-2xl font-bold">{balances.length}</p>
                 </div>
                 <Wallet className="h-8 w-8 text-primary" />
               </div>
@@ -102,10 +108,10 @@ const RealTimeBalances: React.FC = () => {
                 <div>
                   <p className="text-sm text-muted-foreground">Status</p>
                   <div className="flex items-center space-x-2">
-                    <Badge variant="default" className="bg-accent">
-                      CONECTADO
+                    <Badge variant="default" className={error ? 'bg-destructive' : 'bg-accent'}>
+                      {error ? 'ERRO' : 'CONECTADO'}
                     </Badge>
-                    <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />
+                    <div className={`w-2 h-2 rounded-full ${isLoading ? 'bg-yellow-400 animate-pulse' : 'bg-accent animate-ping'}`} />
                   </div>
                 </div>
                 <TrendingUp className="h-8 w-8 text-secondary" />
@@ -114,19 +120,18 @@ const RealTimeBalances: React.FC = () => {
           </Card>
         </div>
 
-        {/* Lista de Saldos por Asset */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {balances.length === 0 && !isLoading ? (
             <Card className="glass-card col-span-full">
-              <CardContent className="p-8 text-center">
-                <Wallet className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-                <h3 className="text-lg font-semibold mb-2">Nenhum saldo encontrado</h3>
-                <p className="text-muted-foreground mb-4">
-                  Conecte sua conta Binance para ver os saldos reais
-                </p>
-                <Button onClick={syncWithBinance}>
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                  Sincronizar Agora
+              <CardContent className="p-8 text-center space-y-4">
+                <Wallet className="h-12 w-12 mx-auto text-muted-foreground" />
+                <div>
+                  <h3 className="text-lg font-semibold">Nenhum saldo encontrado</h3>
+                  <p className="text-muted-foreground">Sincronize com a Binance para carregar seus saldos reais.</p>
+                </div>
+                <Button onClick={onSync}>
+                  <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+                  Sincronizar agora
                 </Button>
               </CardContent>
             </Card>
@@ -137,12 +142,11 @@ const RealTimeBalances: React.FC = () => {
                   <CardTitle className="text-lg flex items-center justify-between">
                     <span>{balance.asset}</span>
                     <Badge variant="outline" className="text-xs">
-                      {balance.spot_balance > 0 && balance.futures_balance > 0 
-                        ? 'SPOT+FUTURES' 
-                        : balance.spot_balance > 0 
-                        ? 'SPOT' 
-                        : 'FUTURES'
-                      }
+                      {balance.spot_balance > 0 && balance.futures_balance > 0
+                        ? 'SPOT + FUTURES'
+                        : balance.spot_balance > 0
+                          ? 'SPOT'
+                          : 'FUTURES'}
                     </Badge>
                   </CardTitle>
                 </CardHeader>
@@ -156,7 +160,7 @@ const RealTimeBalances: React.FC = () => {
                         </span>
                       </div>
                     )}
-                    
+
                     {balance.futures_balance > 0 && (
                       <div className="flex justify-between">
                         <span className="text-sm text-muted-foreground">Futures:</span>
@@ -165,7 +169,7 @@ const RealTimeBalances: React.FC = () => {
                         </span>
                       </div>
                     )}
-                    
+
                     <div className="border-t pt-2">
                       <div className="flex justify-between">
                         <span className="text-sm font-medium">Total:</span>
@@ -174,12 +178,10 @@ const RealTimeBalances: React.FC = () => {
                         </span>
                       </div>
                     </div>
-                    
+
                     {balance.asset === 'USDT' && (
-                      <div className="text-center mt-2">
-                        <span className="text-xs text-muted-foreground">
-                          ≈ {formatCurrency(balance.total_balance)}
-                        </span>
+                      <div className="text-center mt-2 text-xs text-muted-foreground">
+                        ~ {formatCurrency(balance.total_balance)}
                       </div>
                     )}
                   </div>

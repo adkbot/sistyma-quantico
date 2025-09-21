@@ -1,162 +1,176 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { requireUserContext } from "../_shared/supabaseClient.ts";\nimport type { createAdminClient } from "../_shared/supabaseClient.ts";
+import { BinanceConnector, loadBinanceCredentials } from "../_shared/binance.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+interface TradeOpportunity {
+  pair: string;
+  bidPrice: number;
+  askPrice: number;
+  spread: number;
+  volume: number;
+  estimatedProfit: number;
+  confidence: number;
 }
 
-interface TradeOpportunity {
-  pair: string
-  bidPrice: number
-  askPrice: number
-  spread: number
-  volume: number
-  estimatedProfit: number
-  confidence: number
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
 class TradingEngine {
-  private supabase: any
-  
-  constructor(supabaseUrl: string, supabaseKey: string) {
-    this.supabase = createClient(supabaseUrl, supabaseKey)
-  }
+  constructor(
+    private supabase: AdminClient,
+    private userId: string,
+    private binance: BinanceConnector,
+  ) {}
 
   async findArbitrageOpportunities(): Promise<TradeOpportunity[]> {
-    // Buscar dados de mercado em tempo real
-    const { data: marketData } = await this.supabase
-      .from('market_data_cache')
-      .select('*')
-      .gte('updated_at', new Date(Date.now() - 5000).toISOString()) // Últimos 5s
-    
-    if (!marketData || marketData.length === 0) return []
+    const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
+    const { data: marketData, error } = await this.supabase
+      .from("market_data_cache")
+      .select("symbol, bid_price, ask_price, spread, source, updated_at")
+      .gte("updated_at", fiveSecondsAgo);
 
-    const opportunities: TradeOpportunity[] = []
-    
-    // Agrupar por par de trading
-    const pairGroups = marketData.reduce((acc: any, data: any) => {
-      if (!acc[data.symbol]) acc[data.symbol] = []
-      acc[data.symbol].push(data)
-      return acc
-    }, {})
-
-    for (const [pair, exchanges] of Object.entries(pairGroups) as [string, any[]][]) {
-      if (exchanges.length < 2) continue
-
-      // Encontrar maior bid e menor ask
-      const maxBid = Math.max(...exchanges.map(e => e.bid_price))
-      const minAsk = Math.min(...exchanges.map(e => e.ask_price))
-      const spread = ((maxBid - minAsk) / minAsk) * 100
-
-      if (spread > 0.05) { // Mínimo 0.05% de spread
-        const volume = Math.min(...exchanges.map(e => e.bid_quantity))
-        const estimatedProfit = (maxBid - minAsk) * volume * 0.8 // 80% do lucro bruto
-        
-        opportunities.push({
-          pair,
-          bidPrice: maxBid,
-          askPrice: minAsk,
-          spread,
-          volume,
-          estimatedProfit,
-          confidence: this.calculateConfidence(spread, volume)
-        })
-      }
+    if (error || !marketData) {
+      console.error("Market data fetch error", error);
+      return [];
     }
 
-    return opportunities.sort((a, b) => b.estimatedProfit - a.estimatedProfit)
+    const opportunities: TradeOpportunity[] = [];
+    const grouped = marketData.reduce((acc: Record<string, any[]>, row: any) => {
+      if (!acc[row.symbol]) acc[row.symbol] = [];
+      acc[row.symbol].push(row);
+      return acc;
+    }, {} as Record<string, any[]>);
+
+    for (const [pair, entries] of Object.entries(grouped)) {
+      if (entries.length < 2) continue;
+
+      const bestBid = Math.max(...entries.map((e) => Number(e.bid_price ?? 0)));
+      const bestAsk = Math.min(...entries.map((e) => Number(e.ask_price ?? 0)));
+
+      if (!bestBid || !bestAsk || bestBid <= bestAsk) continue;
+
+      const spread = ((bestBid - bestAsk) / bestAsk) * 100;
+      if (spread <= 0.05) continue;
+
+      const volume = Math.min(...entries.map((e) => Number(e.volume_24h ?? 0) || 1));
+      const estimatedProfit = (bestBid - bestAsk) * Math.min(volume, 1);
+
+      opportunities.push({
+        pair,
+        bidPrice: bestBid,
+        askPrice: bestAsk,
+        spread,
+        volume,
+        estimatedProfit,
+        confidence: this.calculateConfidence(spread, volume),
+      });
+    }
+
+    return opportunities.sort((a, b) => b.estimatedProfit - a.estimatedProfit);
   }
 
   private calculateConfidence(spread: number, volume: number): number {
-    // Algoritmo de confiança baseado em spread e volume
-    const spreadScore = Math.min(spread / 0.5, 1) // Max score quando spread >= 0.5%
-    const volumeScore = Math.min(volume / 1000, 1) // Max score quando volume >= 1000
-    return (spreadScore * 0.6 + volumeScore * 0.4) * 100
+    const spreadScore = Math.min(spread / 0.5, 1);
+    const volumeScore = Math.min(volume / 1000, 1);
+    return (spreadScore * 0.6 + volumeScore * 0.4) * 100;
   }
 
   async executeTrade(opportunity: TradeOpportunity): Promise<boolean> {
     try {
-      // Validar saldos antes da execução
-      const { data: balances } = await this.supabase
-        .from('account_balances')
-        .select('*')
-        .eq('user_id', (await this.supabase.auth.getUser()).data.user?.id)
+      const { data: balances, error: balanceError } = await this.supabase
+        .from("account_balances")
+        .select("asset, total_balance")
+        .eq("user_id", this.userId);
 
-      if (!balances || balances.length === 0) {
-        throw new Error('Saldos não encontrados')
+      if (balanceError || !balances?.length) {
+        throw new Error("Insufficient account balance data");
       }
 
-      // Executar trade simultâneo
-      const tradeResult = await this.executeSimultaneousTrade(opportunity)
-      
-      // Registrar o trade
-      await this.supabase.from('trades').insert({
-        user_id: (await this.supabase.auth.getUser()).data.user?.id,
-        pair: opportunity.pair,
-        entry_price: opportunity.askPrice,
-        exit_price: opportunity.bidPrice,
-        quantity: opportunity.volume,
-        side: 'ARBITRAGE',
-        status: 'COMPLETED',
-        pnl: opportunity.estimatedProfit,
-        ai_confidence: opportunity.confidence,
-        execution_time_ms: Date.now()
-      })
+      const usdtBalance = balances.find((b: any) => b.asset === "USDT");
+      if (!usdtBalance || Number(usdtBalance.total_balance ?? 0) <= 0) {
+        throw new Error("No USDT balance available for trading");
+      }
 
-      return true
+      const orderQty = Math.min(opportunity.volume, Number(usdtBalance.total_balance));
+      if (orderQty <= 0) {
+        throw new Error("Calculated order quantity is zero");
+      }
+
+      // Execute spot leg (buy low)
+      await this.binance.placeOrder({
+        market: "spot",
+        symbol: opportunity.pair,
+        side: "BUY",
+        type: "MARKET",
+        quantity: orderQty,
+      });
+
+      // Execute futures leg (sell high)
+      await this.binance.placeOrder({
+        market: "futures",
+        symbol: opportunity.pair,
+        side: "SELL",
+        type: "MARKET",
+        quantity: orderQty,
+        reduceOnly: false,
+        positionSide: "SHORT",
+      });
+
+      await this.binance.persistBalances();
+      return true;
     } catch (error) {
-      console.error('Erro na execução do trade:', error)
-      return false
+      console.error("executeTrade error", error);
+      return false;
     }
-  }
-
-  private async executeSimultaneousTrade(opportunity: TradeOpportunity): Promise<any> {
-    // Implementar execução simultânea nas exchanges
-    // Esta função será expandida com a integração real da Binance
-    return { success: true }
   }
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    
-    const engine = new TradingEngine(supabaseUrl, supabaseKey)
-    
-    if (req.method === 'POST') {
-      const { action } = await req.json()
-      
-      if (action === 'find_opportunities') {
-        const opportunities = await engine.findArbitrageOpportunities()
-        return new Response(JSON.stringify({ opportunities }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        })
-      }
-      
-      if (action === 'execute_trade') {
-        const { opportunity } = await req.json()
-        const result = await engine.executeTrade(opportunity)
-        return new Response(JSON.stringify({ success: result }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        })
-      }
+    const context = await requireUserContext(req);
+    const credentials = await loadBinanceCredentials(context.admin, context.user.id);
+    const connector = new BinanceConnector({ supabase: context.admin, userId: context.user.id, credentials });
+    const engine = new TradingEngine(context.admin, context.user.id, connector);
+
+    if (req.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    return new Response(JSON.stringify({ error: 'Invalid request' }), {
-      status: 400,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
-    
+    const payload = await req.json();
+    const action = payload?.action;
+
+    if (action === "find_opportunities") {
+      const opportunities = await engine.findArbitrageOpportunities();
+      return jsonResponse({ opportunities });
+    }
+
+    if (action === "execute_trade") {
+      if (!payload?.opportunity) {
+        return jsonResponse({ error: "Missing opportunity" }, 400);
+      }
+      const success = await engine.executeTrade(payload.opportunity as TradeOpportunity);
+      return jsonResponse({ success });
+    }
+
+    return jsonResponse({ error: "Invalid request" }, 400);
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    console.error("trading-engine error", error);
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    const status = message === "Unauthorized" ? 401 : 500;
+    return jsonResponse({ error: message }, status);
   }
-})
+});

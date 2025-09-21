@@ -1,3 +1,33 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+.next/
+dist/
+dist-ssr/
+out/
+coverage/
+.cache/
+.vercel/
+.turbo/
+
+# OS and editor files
+.DS_Store
+.idea/
+.vscode/
+!.vscode/mcp.json
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.crt
+*.cer
+
 # Logs
 logs
 *.log
@@ -7,16 +37,8 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
+# Misc
 *.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
 *.suo
 *.ntvs*
 *.njsproj

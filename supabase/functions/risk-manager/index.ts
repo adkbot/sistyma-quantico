@@ -1,331 +1,200 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { requireUserContext } from "../_shared/supabaseClient.ts";
+import type { createAdminClient } from "../_shared/supabaseClient.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
-interface RiskAssessment {
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-  riskScore: number
-  allowTrade: boolean
-  recommendations: string[]
-  maxPositionSize: number
+type SupabaseClient = ReturnType<typeof createAdminClient>;
+
+type RiskAssessment = {
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  riskScore: number;
+  allowTrade: boolean;
+  recommendations: string[];
+  maxPositionSize: number;
+};
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
 class RiskManager {
-  private supabase: any
-  
-  constructor(supabaseUrl: string, supabaseKey: string) {
-    this.supabase = createClient(supabaseUrl, supabaseKey)
-  }
+  constructor(private supabase: SupabaseClient) {}
 
-  async assessRisk(userId: string, tradeParams: any): Promise<RiskAssessment> {
-    try {
-      // Buscar configurações de risco do usuário
-      const { data: riskSettings } = await this.supabase
-        .from('risk_settings')
-        .select('*')
-        .eq('user_id', userId)
-        .single()
-      
-      if (!riskSettings) {
-        throw new Error('Configurações de risco não encontradas')
-      }
-      
-      // Buscar saldos atuais
-      const { data: balances } = await this.supabase
-        .from('account_balances')
-        .select('*')
-        .eq('user_id', userId)
-      
-      // Buscar trades recentes
-      const { data: recentTrades } = await this.supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-      
-      // Calcular métricas de risco
-      const riskMetrics = await this.calculateRiskMetrics(
-        riskSettings,
-        balances,
-        recentTrades,
-        tradeParams
-      )
-      
-      return this.generateRiskAssessment(riskMetrics, riskSettings, tradeParams)
-      
-    } catch (error) {
-      console.error('Erro na avaliação de risco:', error)
-      return {
-        riskLevel: 'CRITICAL',
-        riskScore: 100,
-        allowTrade: false,
-        recommendations: ['Erro na avaliação de risco - trade bloqueado'],
-        maxPositionSize: 0
-      }
+  async assessRisk(userId: string, tradeParams: Record<string, number>): Promise<RiskAssessment> {
+    const { data: riskSettings, error: riskError } = await this.supabase
+      .from("risk_settings")
+      .select("*")
+      .eq("user_id", userId)
+      .single();
+
+    if (riskError || !riskSettings) {
+      throw new Error("Configura��es de risco n�o encontradas");
     }
+
+    const { data: balances, error: balancesError } = await this.supabase
+      .from("account_balances")
+      .select("spot_balance, futures_balance")
+      .eq("user_id", userId);
+
+    if (balancesError) {
+      throw new Error(balancesError.message);
+    }
+
+    const { data: recentTrades, error: tradesError } = await this.supabase
+      .from("trades")
+      .select("pnl, quantity, entry_price, status, created_at")
+      .eq("user_id", userId)
+      .gte("created_at", new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+
+    if (tradesError) {
+      throw new Error(tradesError.message);
+    }
+
+    const metrics = this.calculateRiskMetrics(
+      riskSettings,
+      balances ?? [],
+      recentTrades ?? [],
+      tradeParams,
+    );
+
+    return this.generateRiskAssessment(metrics, riskSettings, tradeParams);
   }
 
-  private async calculateRiskMetrics(
-    riskSettings: any,
+  private calculateRiskMetrics(
+    riskSettings: Record<string, number>,
     balances: any[],
     recentTrades: any[],
-    tradeParams: any
-  ): Promise<any> {
-    
-    // Calcular saldo total
-    const totalBalance = balances.reduce((sum, b) => 
-      sum + (b.spot_balance || 0) + (b.futures_balance || 0), 0
-    )
-    
-    // Calcular exposição atual
+    tradeParams: Record<string, number>,
+  ) {
+    const totalBalance = balances.reduce(
+      (sum, balance) => sum + Number(balance.spot_balance ?? 0) + Number(balance.futures_balance ?? 0),
+      0,
+    );
+
     const currentExposure = recentTrades
-      .filter(t => t.status === 'OPEN' || t.status === 'PENDING')
-      .reduce((sum, t) => sum + (t.quantity * t.entry_price), 0)
-    
-    // Calcular PnL das últimas 24h
-    const dailyPnL = recentTrades.reduce((sum, t) => sum + (t.pnl || 0), 0)
-    
-    // Calcular número de trades perdedores consecutivos
-    const sortedTrades = recentTrades
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-    
-    let consecutiveLosses = 0
+      .filter((trade) => trade.status === "OPEN" || trade.status === "PENDING")
+      .reduce((sum, trade) => sum + Number(trade.quantity ?? 0) * Number(trade.entry_price ?? 0), 0);
+
+    const dailyPnL = recentTrades.reduce((sum, trade) => sum + Number(trade.pnl ?? 0), 0);
+
+    const sortedTrades = [...recentTrades].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+
+    let consecutiveLosses = 0;
     for (const trade of sortedTrades) {
-      if (trade.pnl < 0) {
-        consecutiveLosses++
-      } else {
-        break
-      }
+      if ((trade.pnl ?? 0) < 0) consecutiveLosses += 1;
+      else break;
     }
-    
-    // Calcular volatilidade do portfólio
-    const pnlValues = recentTrades.map(t => t.pnl || 0)
-    const avgPnL = pnlValues.reduce((a, b) => a + b, 0) / pnlValues.length
-    const variance = pnlValues.reduce((a, b) => a + Math.pow(b - avgPnL, 2), 0) / pnlValues.length
-    const volatility = Math.sqrt(variance)
-    
+
+    const pnlValues = recentTrades.map((trade) => Number(trade.pnl ?? 0));
+    const avgPnL = pnlValues.length > 0 ? pnlValues.reduce((a, b) => a + b, 0) / pnlValues.length : 0;
+    const variance = pnlValues.length > 0
+      ? pnlValues.reduce((acc, value) => acc + Math.pow(value - avgPnL, 2), 0) / pnlValues.length
+      : 0;
+    const volatility = Math.sqrt(variance);
+
+    const proposedExposure = Number(tradeParams.quantity ?? 0) * Number(tradeParams.price ?? 0);
+
     return {
       totalBalance,
       currentExposure,
-      exposureRatio: currentExposure / totalBalance,
+      exposureRatio: totalBalance > 0 ? currentExposure / totalBalance : 0,
       dailyPnL,
-      dailyPnLRatio: dailyPnL / totalBalance,
+      dailyPnLRatio: totalBalance > 0 ? dailyPnL / totalBalance : 0,
       consecutiveLosses,
       volatility,
-      proposedExposure: tradeParams.quantity * tradeParams.price,
-      tradesLast24h: recentTrades.length
-    }
+      proposedExposure,
+      tradesLast24h: recentTrades.length,
+      riskSettings,
+    };
   }
 
-  private generateRiskAssessment(metrics: any, settings: any, tradeParams: any): RiskAssessment {
-    let riskScore = 0
-    const recommendations: string[] = []
-    
-    // Avaliar exposição total
-    const newExposureRatio = (metrics.currentExposure + metrics.proposedExposure) / metrics.totalBalance
-    if (newExposureRatio > settings.max_portfolio_risk / 100) {
-      riskScore += 30
-      recommendations.push('Exposição do portfólio muito alta')
+  private generateRiskAssessment(metrics: any, settings: any, tradeParams: Record<string, number>): RiskAssessment {
+    let riskScore = 0;
+    const recommendations: string[] = [];
+
+    const newExposureRatio = metrics.totalBalance > 0
+      ? (metrics.currentExposure + metrics.proposedExposure) / metrics.totalBalance
+      : 1;
+
+    if (newExposureRatio > (settings.max_portfolio_risk ?? 10) / 100) {
+      riskScore += 30;
+      recommendations.push("Exposi��o do portf�lio muito alta");
     }
-    
-    // Avaliar PnL diário
-    if (Math.abs(metrics.dailyPnLRatio) > settings.daily_loss_limit / 100) {
-      riskScore += 25
-      recommendations.push('Limite de perda diária atingido')
+
+    if (Math.abs(metrics.dailyPnLRatio) > (settings.daily_loss_limit ?? 5) / 100) {
+      riskScore += 25;
+      recommendations.push("Limite de perda di�ria atingido");
     }
-    
-    // Avaliar trades perdedores consecutivos
-    if (metrics.consecutiveLosses >= settings.max_consecutive_losses) {
-      riskScore += 20
-      recommendations.push('Muitos trades perdedores consecutivos')
+
+    if (metrics.consecutiveLosses >= (settings.max_consecutive_losses ?? 3)) {
+      riskScore += 20;
+      recommendations.push("Muitos trades perdedores consecutivos");
     }
-    
-    // Avaliar volatilidade
-    if (metrics.volatility > settings.max_portfolio_risk * 0.5) {
-      riskScore += 15
-      recommendations.push('Alta volatilidade detectada')
+
+    if (metrics.volatility > (settings.max_portfolio_risk ?? 10) * 0.5) {
+      riskScore += 15;
+      recommendations.push("Alta volatilidade detectada");
     }
-    
-    // Avaliar frequência de trades
-    if (metrics.tradesLast24h > settings.max_daily_trades) {
-      riskScore += 10
-      recommendations.push('Limite de trades diários atingido')
+
+    if (metrics.tradesLast24h > (settings.max_daily_trades ?? 20)) {
+      riskScore += 10;
+      recommendations.push("Limite de trades di�rios atingido");
     }
-    
-    // Determinar nível de risco
-    let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-    if (riskScore < 20) riskLevel = 'LOW'
-    else if (riskScore < 40) riskLevel = 'MEDIUM'
-    else if (riskScore < 70) riskLevel = 'HIGH'
-    else riskLevel = 'CRITICAL'
-    
-    // Calcular tamanho máximo da posição
-    const maxPositionSize = this.calculateMaxPositionSize(metrics, settings, riskScore)
-    
+
+    let riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" = "LOW";
+    if (riskScore >= 70) riskLevel = "CRITICAL";
+    else if (riskScore >= 50) riskLevel = "HIGH";
+    else if (riskScore >= 30) riskLevel = "MEDIUM";
+
+    const maxPositionSizePercentage = settings.max_position_size_percentage ?? 10;
+    const maxPositionSize = metrics.totalBalance * (maxPositionSizePercentage / 100);
+
+    const allowTrade = riskLevel !== "CRITICAL" && riskScore < 80;
+
+    if (!allowTrade) {
+      recommendations.push("Revisar par�metros de risco antes de continuar");
+    }
+
     return {
       riskLevel,
       riskScore,
-      allowTrade: riskScore < 70 && maxPositionSize > 0,
-      recommendations: recommendations.length > 0 ? recommendations : ['Risco dentro dos parâmetros'],
-      maxPositionSize
-    }
-  }
-
-  private calculateMaxPositionSize(metrics: any, settings: any, riskScore: number): number {
-    const baseMaxSize = metrics.totalBalance * (settings.max_position_size / 100)
-    const riskAdjustment = Math.max(0, 1 - (riskScore / 100))
-    const volatilityAdjustment = Math.max(0.1, 1 - (metrics.volatility / 100))
-    
-    return baseMaxSize * riskAdjustment * volatilityAdjustment
-  }
-
-  async emergencyStop(userId: string, reason: string): Promise<boolean> {
-    try {
-      // Atualizar status do bot para parado
-      await this.supabase
-        .from('bot_status')
-        .update({
-          is_running: false,
-          current_mode: 'EMERGENCY_STOP',
-          emergency_stop_reason: reason,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-      
-      // Registrar evento de emergência
-      await this.supabase
-        .from('system_logs')
-        .insert({
-          user_id: userId,
-          log_level: 'CRITICAL',
-          component: 'RISK_MANAGER',
-          message: `Emergency stop triggered: ${reason}`,
-          created_at: new Date().toISOString()
-        })
-      
-      // TODO: Implementar cancelamento de ordens abertas
-      
-      return true
-    } catch (error) {
-      console.error('Erro no emergency stop:', error)
-      return false
-    }
-  }
-
-  async monitorLiveRisk(userId: string): Promise<any> {
-    try {
-      // Buscar posições abertas
-      const { data: openTrades } = await this.supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', userId)
-        .in('status', ['OPEN', 'PENDING'])
-      
-      // Buscar configurações de risco
-      const { data: riskSettings } = await this.supabase
-        .from('risk_settings')
-        .select('*')
-        .eq('user_id', userId)
-        .single()
-      
-      if (!openTrades || !riskSettings) {
-        return { status: 'NO_DATA', alerts: [] }
-      }
-      
-      const alerts = []
-      
-      // Verificar stop-loss para cada posição
-      for (const trade of openTrades) {
-        const currentLoss = Math.abs(trade.pnl || 0)
-        const maxLoss = (trade.quantity * trade.entry_price) * (riskSettings.stop_loss_percentage / 100)
-        
-        if (currentLoss > maxLoss) {
-          alerts.push({
-            type: 'STOP_LOSS',
-            severity: 'HIGH',
-            tradeId: trade.id,
-            message: `Stop-loss atingido para ${trade.pair}`,
-            currentLoss,
-            maxLoss
-          })
-        }
-      }
-      
-      // Verificar limite de drawdown
-      const totalPnL = openTrades.reduce((sum, t) => sum + (t.pnl || 0), 0)
-      if (totalPnL < -(riskSettings.max_drawdown_amount || 0)) {
-        alerts.push({
-          type: 'MAX_DRAWDOWN',
-          severity: 'CRITICAL',
-          message: 'Limite máximo de drawdown atingido',
-          currentDrawdown: totalPnL,
-          maxDrawdown: riskSettings.max_drawdown_amount
-        })
-      }
-      
-      return { status: 'MONITORING', alerts }
-      
-    } catch (error) {
-      console.error('Erro no monitoramento de risco:', error)
-      return { status: 'ERROR', alerts: [] }
-    }
+      allowTrade,
+      recommendations,
+      maxPositionSize,
+    };
   }
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    
-    const riskManager = new RiskManager(supabaseUrl, supabaseKey)
-    
-    if (req.method === 'POST') {
-      const { action, userId, tradeParams, reason } = await req.json()
-      
-      switch (action) {
-        case 'assess_risk':
-          const assessment = await riskManager.assessRisk(userId, tradeParams)
-          return new Response(JSON.stringify({ assessment }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'emergency_stop':
-          const stopResult = await riskManager.emergencyStop(userId, reason)
-          return new Response(JSON.stringify({ success: stopResult }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'monitor_risk':
-          const monitoring = await riskManager.monitorLiveRisk(userId)
-          return new Response(JSON.stringify({ monitoring }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        default:
-          return new Response(JSON.stringify({ error: 'Invalid action' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-      }
+    const context = await requireUserContext(req);
+    const manager = new RiskManager(context.userClient);
+
+    if (req.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
-    
+    const payload = await req.json();
+    const tradeParams = payload?.tradeParams ?? {};
+    const assessment = await manager.assessRisk(context.user.id, tradeParams);
+    return jsonResponse({ assessment });
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    console.error("risk-manager error", error);
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    const status = message === "Unauthorized" ? 401 : 500;
+    return jsonResponse({ error: message }, status);
   }
-})
+});

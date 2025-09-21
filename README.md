@@ -71,3 +71,11 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+
+## Environment Variables
+
+The Supabase Edge functions expect the following variables to be configured in your project settings:
+
+- `SUPABASE_SERVICE_ROLE_KEY` – service role key used by Edge Functions (never expose this in the client).
+- `LAEVITAS_API_KEY` – API key for Laevitas GEX analytics (kept server-side only).
+- `BINANCE_API_KEY`/`BINANCE_SECRET_KEY` are stored per user via the `api-keys` Edge Function and do not need to be declared globally.

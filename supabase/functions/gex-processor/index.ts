@@ -1,54 +1,66 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createAdminClient, requireUserContext } from "../_shared/supabaseClient.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
 
-interface GEXData {
-  symbol: string
-  gex: number
-  dex: number
-  cex: number
-  spotPrice: number
-  regime: 'BULLISH' | 'BEARISH' | 'NEUTRAL'
-  regimeStrength: number
+type SupabaseClient = ReturnType<typeof createAdminClient>;
+
+type GEXData = {
+  symbol: string;
+  gex: number;
+  dex: number;
+  cex: number;
+  spotPrice: number;
+  regime: "BULLISH" | "BEARISH" | "NEUTRAL";
+  regimeStrength: number;
+};
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
 class GEXProcessor {
-  private supabase: any
-  private laevitasApiUrl = 'https://api.laevitas.com'
-  
-  constructor(supabaseUrl: string, supabaseKey: string) {
-    this.supabase = createClient(supabaseUrl, supabaseKey)
+  private supabase: SupabaseClient;
+  private apiUrl = "https://api.laevitas.ch";
+  private apiKey = Deno.env.get("LAEVITAS_API_KEY");
+
+  constructor(client: SupabaseClient) {
+    this.supabase = client;
+    if (!this.apiKey) {
+      console.warn("LAEVITAS_API_KEY not configured; GEX requests may fail");
+    }
   }
 
-  async fetchGEXData(symbol: string = 'BTC'): Promise<GEXData | null> {
+  async fetchGEXData(symbol = "BTCUSDT"): Promise<GEXData | null> {
     try {
-      // Buscar dados GEX da API Laevitas (pública)
-      const response = await fetch(`${this.laevitasApiUrl}/analytics/gex?symbol=${symbol}`)
-      
+      const endpoint = `${this.apiUrl}/analytics/gex`;
+      const response = await fetch(`${endpoint}?symbol=${symbol}`, {
+        headers: this.apiKey ? { "x-api-key": this.apiKey } : undefined,
+      });
+
       if (!response.ok) {
-        throw new Error(`Erro na API Laevitas: ${response.status}`)
+        throw new Error(`Laevitas API error: ${response.status}`);
       }
-      
-      const data = await response.json()
-      
-      // Processar dados GEX
+
+      const data = await response.json();
       const gexData: GEXData = {
         symbol,
-        gex: data.gex || 0,
-        dex: data.dex || 0,
-        cex: data.cex || 0,
-        spotPrice: data.spot_price || 0,
-        regime: this.determineRegime(data.gex, data.dex),
-        regimeStrength: this.calculateRegimeStrength(data.gex, data.dex)
-      }
-      
-      // Salvar no cache do banco
-      await this.supabase
-        .from('gex_data')
+        gex: Number(data.gex ?? 0),
+        dex: Number(data.dex ?? 0),
+        cex: Number(data.cex ?? 0),
+        spotPrice: Number(data.spot_price ?? 0),
+        regime: this.determineRegime(Number(data.gex ?? 0), Number(data.dex ?? 0)),
+        regimeStrength: this.calculateRegimeStrength(Number(data.gex ?? 0), Number(data.dex ?? 0)),
+      };
+
+      const { error } = await this.supabase
+        .from("gex_data")
         .upsert({
           symbol,
           gex_value: gexData.gex,
@@ -58,190 +70,151 @@ class GEXProcessor {
           regime: gexData.regime,
           regime_strength: gexData.regimeStrength,
           raw_data: data,
-          updated_at: new Date().toISOString()
-        })
-      
-      return gexData
-      
+          updated_at: new Date().toISOString(),
+        });
+
+      if (error) {
+        console.error("gex_data upsert error", error);
+      }
+
+      return gexData;
     } catch (error) {
-      console.error('Erro ao buscar dados GEX:', error)
-      return null
+      console.error("fetchGEXData error", error);
+      return null;
     }
   }
 
-  private determineRegime(gex: number, dex: number): 'BULLISH' | 'BEARISH' | 'NEUTRAL' {
-    const gexThreshold = 0.1
-    const ratio = gex / (Math.abs(dex) + 1)
-    
-    if (ratio > gexThreshold && gex > 0) {
-      return 'BULLISH'
-    } else if (ratio < -gexThreshold && gex < 0) {
-      return 'BEARISH'
-    } else {
-      return 'NEUTRAL'
-    }
+  private determineRegime(gex: number, dex: number): "BULLISH" | "BEARISH" | "NEUTRAL" {
+    const threshold = 0.1;
+    const ratio = gex / (Math.abs(dex) + 1);
+    if (ratio > threshold && gex > 0) return "BULLISH";
+    if (ratio < -threshold && gex < 0) return "BEARISH";
+    return "NEUTRAL";
   }
 
   private calculateRegimeStrength(gex: number, dex: number): number {
-    // Calcula a força do regime (0-100)
-    const maxGex = 1.0 // Valor máximo esperado
-    const normalizedGex = Math.abs(gex) / maxGex
-    const normalizedDex = Math.abs(dex) / maxGex
-    
-    return Math.min((normalizedGex + normalizedDex) * 50, 100)
+    const maxExpected = 1;
+    const normalizedGex = Math.min(Math.abs(gex) / maxExpected, 1);
+    const normalizedDex = Math.min(Math.abs(dex) / maxExpected, 1);
+    return Math.min((normalizedGex + normalizedDex) * 50, 100);
   }
 
-  async analyzeGEXTrend(symbol: string, hours: number = 24): Promise<any> {
-    try {
-      // Buscar dados históricos GEX
-      const { data: historicalData } = await this.supabase
-        .from('gex_data')
-        .select('*')
-        .eq('symbol', symbol)
-        .gte('updated_at', new Date(Date.now() - hours * 60 * 60 * 1000).toISOString())
-        .order('updated_at', { ascending: true })
-      
-      if (!historicalData || historicalData.length < 2) {
-        return { trend: 'INSUFFICIENT_DATA', strength: 0 }
-      }
-      
-      // Calcular tendência
-      const firstGex = historicalData[0].gex_value
-      const lastGex = historicalData[historicalData.length - 1].gex_value
-      const change = ((lastGex - firstGex) / Math.abs(firstGex)) * 100
-      
-      let trend = 'NEUTRAL'
-      if (change > 5) trend = 'INCREASING'
-      else if (change < -5) trend = 'DECREASING'
-      
-      // Calcular volatilidade
-      const gexValues = historicalData.map(d => d.gex_value)
-      const mean = gexValues.reduce((a, b) => a + b, 0) / gexValues.length
-      const variance = gexValues.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / gexValues.length
-      const volatility = Math.sqrt(variance)
-      
-      return {
-        trend,
-        change: change.toFixed(2),
-        strength: Math.min(Math.abs(change) * 10, 100),
-        volatility: volatility.toFixed(4),
-        dataPoints: historicalData.length
-      }
-      
-    } catch (error) {
-      console.error('Erro na análise de tendência GEX:', error)
-      return { trend: 'ERROR', strength: 0 }
+  async analyzeTrend(symbol: string, hours = 24) {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    const { data, error } = await this.supabase
+      .from("gex_data")
+      .select("gex_value, updated_at")
+      .eq("symbol", symbol)
+      .gte("updated_at", since)
+      .order("updated_at", { ascending: true });
+
+    if (error || !data || data.length < 2) {
+      return { trend: "INSUFFICIENT_DATA", strength: 0 };
     }
+
+    const first = data[0].gex_value ?? 0;
+    const last = data[data.length - 1].gex_value ?? 0;
+    const change = first !== 0 ? ((last - first) / Math.abs(first)) * 100 : 0;
+
+    let trend: string = "NEUTRAL";
+    if (change > 5) trend = "INCREASING";
+    else if (change < -5) trend = "DECREASING";
+
+    const gexValues = data.map((entry) => entry.gex_value ?? 0);
+    const mean = gexValues.reduce((sum, value) => sum + value, 0) / gexValues.length;
+    const variance = gexValues.reduce((sum, value) => sum + Math.pow(value - mean, 2), 0) / gexValues.length;
+    const volatility = Math.sqrt(variance);
+
+    return {
+      trend,
+      change: Number(change.toFixed(2)),
+      strength: Math.min(Math.abs(change) * 10, 100),
+      volatility: Number(volatility.toFixed(4)),
+      dataPoints: data.length,
+    };
   }
 
-  async getGEXSignals(symbol: string): Promise<any> {
-    try {
-      const currentData = await this.fetchGEXData(symbol)
-      if (!currentData) return { signals: [], confidence: 0 }
-      
-      const trendData = await this.analyzeGEXTrend(symbol)
-      
-      const signals = []
-      let confidence = 0
-      
-      // Sinal de regime bullish forte
-      if (currentData.regime === 'BULLISH' && currentData.regimeStrength > 70) {
-        signals.push({
-          type: 'ENTRY_LONG',
-          strength: currentData.regimeStrength,
-          reason: 'Regime GEX fortemente bullish'
-        })
-        confidence += 30
-      }
-      
-      // Sinal de regime bearish forte
-      if (currentData.regime === 'BEARISH' && currentData.regimeStrength > 70) {
-        signals.push({
-          type: 'ENTRY_SHORT',
-          strength: currentData.regimeStrength,
-          reason: 'Regime GEX fortemente bearish'
-        })
-        confidence += 30
-      }
-      
-      // Sinal de mudança de tendência
-      if (trendData.trend === 'INCREASING' && trendData.strength > 50) {
-        signals.push({
-          type: 'TREND_CHANGE_UP',
-          strength: trendData.strength,
-          reason: 'GEX em tendência crescente'
-        })
-        confidence += 25
-      }
-      
-      if (trendData.trend === 'DECREASING' && trendData.strength > 50) {
-        signals.push({
-          type: 'TREND_CHANGE_DOWN',
-          strength: trendData.strength,
-          reason: 'GEX em tendência decrescente'
-        })
-        confidence += 25
-      }
-      
-      return { signals, confidence: Math.min(confidence, 100) }
-      
-    } catch (error) {
-      console.error('Erro ao gerar sinais GEX:', error)
-      return { signals: [], confidence: 0 }
+  async getSignals(symbol: string) {
+    const current = await this.fetchGEXData(symbol);
+    if (!current) return { signals: [], confidence: 0 };
+
+    const trendData = await this.analyzeTrend(symbol);
+
+    const signals: Array<{ type: string; strength: number; reason: string }> = [];
+    let confidence = 0;
+
+    if (current.regime === "BULLISH" && current.regimeStrength > 70) {
+      signals.push({ type: "ENTRY_LONG", strength: current.regimeStrength, reason: "Regime GEX bullish" });
+      confidence += 30;
     }
+
+    if (current.regime === "BEARISH" && current.regimeStrength > 70) {
+      signals.push({ type: "ENTRY_SHORT", strength: current.regimeStrength, reason: "Regime GEX bearish" });
+      confidence += 30;
+    }
+
+    if (trendData.trend === "INCREASING") {
+      signals.push({ type: "MOMENTUM_LONG", strength: trendData.strength, reason: "Tend�ncia GEX crescente" });
+      confidence += 20;
+    } else if (trendData.trend === "DECREASING") {
+      signals.push({ type: "MOMENTUM_SHORT", strength: trendData.strength, reason: "Tend�ncia GEX decrescente" });
+      confidence += 20;
+    }
+
+    if (current.spotPrice > 0) {
+      signals.push({
+        type: "SPOT_MONITOR",
+        strength: 50,
+        reason: `Pre�o spot ${current.spotPrice}`,
+      });
+    }
+
+    return {
+      signals,
+      confidence: Math.min(confidence, 100),
+      trend: trendData,
+      current,
+    };
   }
 }
 
+const adminClient = createAdminClient();
+const processor = new GEXProcessor(adminClient);
+
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    
-    const processor = new GEXProcessor(supabaseUrl, supabaseKey)
-    
-    if (req.method === 'POST') {
-      const { action, symbol = 'BTC', hours = 24 } = await req.json()
-      
-      switch (action) {
-        case 'fetch_gex':
-          const gexData = await processor.fetchGEXData(symbol)
-          return new Response(JSON.stringify({ gexData }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'analyze_trend':
-          const trendData = await processor.analyzeGEXTrend(symbol, hours)
-          return new Response(JSON.stringify({ trendData }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'get_signals':
-          const signals = await processor.getGEXSignals(symbol)
-          return new Response(JSON.stringify({ signals }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        default:
-          return new Response(JSON.stringify({ error: 'Invalid action' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-      }
+    await requireUserContext(req);
+
+    if (req.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
-    
+    const { action, symbol = "BTCUSDT" } = await req.json();
+
+    switch (action) {
+      case "fetch": {
+        const gex = await processor.fetchGEXData(symbol);
+        return jsonResponse({ gex });
+      }
+      case "trend": {
+        const trend = await processor.analyzeTrend(symbol);
+        return jsonResponse({ trend });
+      }
+      case "signals": {
+        const signals = await processor.getSignals(symbol);
+        return jsonResponse({ signals });
+      }
+      default:
+        return jsonResponse({ error: "Invalid action" }, 400);
+    }
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    console.error("gex-processor error", error);
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    const status = message === "Unauthorized" ? 401 : 500;
+    return jsonResponse({ error: message }, status);
   }
-})
+});

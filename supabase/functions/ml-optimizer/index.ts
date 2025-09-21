@@ -1,325 +1,302 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { requireUserContext } from "../_shared/supabaseClient.ts";
+import type { createAdminClient } from "../_shared/supabaseClient.ts";
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+};
+
+function jsonResponse(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
 }
 
-interface MLModel {
-  modelType: string
-  version: string
-  parameters: any
-  performance: number
-  learningRate: number
-  accuracyRate: number
-}
+type SupabaseClient = ReturnType<typeof createAdminClient>;
+
+type MLModel = {
+  modelType: string;
+  version: string;
+  parameters: Record<string, number>;
+  performance: number;
+  learningRate: number;
+  accuracyRate: number;
+};
 
 class MLOptimizer {
-  private supabase: any
-  private currentModel: MLModel | null = null
-  
-  constructor(supabaseUrl: string, supabaseKey: string) {
-    this.supabase = createClient(supabaseUrl, supabaseKey)
+  private supabase: SupabaseClient;
+  private currentModel: MLModel | null = null;
+
+  constructor(client: SupabaseClient) {
+    this.supabase = client;
   }
 
   async loadModel(userId: string): Promise<MLModel | null> {
-    try {
-      const { data: modelData } = await this.supabase
-        .from('ai_settings')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('is_active', true)
-        .single()
-      
-      if (modelData) {
-        this.currentModel = {
-          modelType: modelData.model_type,
-          version: modelData.model_version,
-          parameters: modelData.training_parameters,
-          performance: modelData.performance_score,
-          learningRate: modelData.learning_rate,
-          accuracyRate: modelData.prediction_accuracy
-        }
-      }
-      
-      return this.currentModel
-    } catch (error) {
-      console.error('Erro ao carregar modelo:', error)
-      return null
+    const { data, error } = await this.supabase
+      .from("ai_settings")
+      .select("model_type, model_version, training_parameters, performance_score, learning_rate, prediction_accuracy")
+      .eq("user_id", userId)
+      .eq("is_active", true)
+      .single();
+
+    if (error) {
+      console.error("loadModel error", error);
+      return null;
     }
-  }
 
-  async trainWithTradeData(userId: string): Promise<any> {
-    try {
-      // Buscar trades recentes para treinamento
-      const { data: trades } = await this.supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString()) // Últimos 7 dias
-        .order('created_at', { ascending: false })
-        .limit(1000)
-      
-      if (!trades || trades.length < 10) {
-        return { success: false, reason: 'Dados insuficientes para treinamento' }
-      }
-      
-      // Preparar dados de treinamento
-      const trainingData = this.prepareTrainingData(trades)
-      
-      // Aplicar algoritmo de Reinforcement Learning
-      const modelUpdate = await this.reinforcementLearning(trainingData)
-      
-      // Atualizar modelo no banco
-      await this.supabase
-        .from('ai_settings')
-        .upsert({
-          user_id: userId,
-          model_type: 'REINFORCEMENT_LEARNING',
-          model_version: this.generateModelVersion(),
-          training_parameters: modelUpdate.parameters,
-          performance_score: modelUpdate.performance,
-          learning_rate: modelUpdate.learningRate,
-          prediction_accuracy: modelUpdate.accuracy,
-          training_data_size: trades.length,
-          last_training: new Date().toISOString(),
-          is_active: true
-        })
-      
-      return {
-        success: true,
-        performance: modelUpdate.performance,
-        accuracy: modelUpdate.accuracy,
-        trainingDataSize: trades.length
-      }
-      
-    } catch (error) {
-      console.error('Erro no treinamento:', error)
-      return { success: false, reason: error.message }
+    if (data) {
+      this.currentModel = {
+        modelType: data.model_type,
+        version: data.model_version,
+        parameters: data.training_parameters ?? {},
+        performance: data.performance_score ?? 0,
+        learningRate: data.learning_rate ?? 0,
+        accuracyRate: data.prediction_accuracy ?? 0,
+      };
     }
+
+    return this.currentModel;
   }
 
-  private prepareTrainingData(trades: any[]): any[] {
-    return trades.map(trade => ({
-      // Features (entradas)
-      spread: trade.spread || 0,
-      volume: trade.quantity || 0,
-      aiConfidence: trade.ai_confidence || 0,
-      executionTime: trade.execution_time_ms || 0,
-      slippage: trade.slippage || 0,
-      
-      // Target (resultado)
-      success: trade.pnl > 0,
-      pnl: trade.pnl || 0,
-      actualSlippage: trade.slippage || 0
-    }))
+  async trainWithTradeData(userId: string) {
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: trades, error } = await this.supabase
+      .from("trades")
+      .select("pnl, quantity, ai_confidence, execution_time_ms, slippage, created_at")
+      .eq("user_id", userId)
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(1000);
+
+    if (error) {
+      console.error("trainWithTradeData error", error);
+      return { success: false, reason: error.message };
+    }
+
+    if (!trades || trades.length < 10) {
+      return { success: false, reason: "Dados insuficientes para treinamento" };
+    }
+
+    const trainingData = this.prepareTrainingData(trades);
+    const modelUpdate = await this.reinforcementLearning(trainingData);
+
+    const { error: upsertError } = await this.supabase
+      .from("ai_settings")
+      .upsert({
+        user_id: userId,
+        model_type: "REINFORCEMENT_LEARNING",
+        model_version: this.generateModelVersion(),
+        training_parameters: modelUpdate.parameters,
+        performance_score: modelUpdate.performance,
+        learning_rate: modelUpdate.learningRate,
+        prediction_accuracy: modelUpdate.accuracy,
+        training_data_size: trades.length,
+        last_training: new Date().toISOString(),
+        is_active: true,
+      });
+
+    if (upsertError) {
+      console.error("trainWithTradeData upsert error", upsertError);
+      return { success: false, reason: upsertError.message };
+    }
+
+    this.currentModel = {
+      modelType: "REINFORCEMENT_LEARNING",
+      version: this.generateModelVersion(),
+      parameters: modelUpdate.parameters,
+      performance: modelUpdate.performance,
+      learningRate: modelUpdate.learningRate,
+      accuracyRate: modelUpdate.accuracy,
+    };
+
+    return {
+      success: true,
+      performance: modelUpdate.performance,
+      accuracy: modelUpdate.accuracy,
+      trainingDataSize: trades.length,
+    };
   }
 
-  private async reinforcementLearning(trainingData: any[]): Promise<any> {
-    // Implementação simplificada de Q-Learning
-    const qTable = new Map()
-    const learningRate = 0.1
-    const discountFactor = 0.95
-    
-    let totalReward = 0
-    let successfulTrades = 0
-    
+  private prepareTrainingData(trades: any[]) {
+    return trades.map((trade) => ({
+      spread: trade.spread ?? 0,
+      volume: trade.quantity ?? 0,
+      aiConfidence: trade.ai_confidence ?? 0,
+      executionTime: trade.execution_time_ms ?? 0,
+      slippage: trade.slippage ?? 0,
+      success: (trade.pnl ?? 0) > 0,
+      pnl: trade.pnl ?? 0,
+      actualSlippage: trade.slippage ?? 0,
+    }));
+  }
+
+  private async reinforcementLearning(trainingData: any[]) {
+    const qTable = new Map<string, number>();
+    const learningRate = 0.1;
+    const discountFactor = 0.95;
+
+    let totalReward = 0;
+    let successfulTrades = 0;
+
     for (const data of trainingData) {
-      // Estado baseado em spread e volume
-      const state = this.discretizeState(data.spread, data.volume, data.aiConfidence)
-      
-      // Ação: operar ou não operar
-      const action = data.success ? 'TRADE' : 'SKIP'
-      
-      // Recompensa baseada no PnL
-      const reward = data.success ? (data.pnl * 10) : -Math.abs(data.pnl * 5)
-      
-      // Atualizar Q-Table
-      const qKey = `${state}_${action}`
-      const currentQ = qTable.get(qKey) || 0
-      const maxFutureQ = this.getMaxQValue(qTable, state)
-      
-      const newQ = currentQ + learningRate * (reward + discountFactor * maxFutureQ - currentQ)
-      qTable.set(qKey, newQ)
-      
-      totalReward += reward
-      if (data.success) successfulTrades++
+      const state = this.discretizeState(data.spread, data.volume, data.aiConfidence);
+      const action = data.success ? "TRADE" : "SKIP";
+      const reward = data.success ? data.pnl * 10 : -Math.abs(data.pnl * 5);
+
+      const key = `${state}_${action}`;
+      const currentQ = qTable.get(key) ?? 0;
+      const maxFutureQ = this.getMaxQValue(qTable, state);
+      const updatedQ = currentQ + learningRate * (reward + discountFactor * maxFutureQ - currentQ);
+      qTable.set(key, updatedQ);
+
+      totalReward += reward;
+      if (data.success) successfulTrades += 1;
     }
-    
-    const accuracy = (successfulTrades / trainingData.length) * 100
-    const avgReward = totalReward / trainingData.length
-    
+
+    const accuracy = (successfulTrades / trainingData.length) * 100;
+    const avgReward = totalReward / trainingData.length;
+
     return {
       parameters: Object.fromEntries(qTable),
-      performance: Math.max(0, Math.min(100, avgReward + 50)), // Normalizar para 0-100
+      performance: Math.max(0, Math.min(100, avgReward + 50)),
       learningRate,
-      accuracy
+      accuracy,
+    };
+  }
+
+  private discretizeState(spread: number, volume: number, confidence: number) {
+    const spreadBucket = Math.min(Math.floor(spread * 10), 10);
+    const volumeBucket = Math.min(Math.floor(volume / 100), 10);
+    const confidenceBucket = Math.min(Math.floor(confidence / 10), 10);
+    return `${spreadBucket}_${volumeBucket}_${confidenceBucket}`;
+  }
+
+  private getMaxQValue(qTable: Map<string, number>, state: string) {
+    const tradeKey = `${state}_TRADE`;
+    const skipKey = `${state}_SKIP`;
+    return Math.max(qTable.get(tradeKey) ?? 0, qTable.get(skipKey) ?? 0);
+  }
+
+  private generateModelVersion() {
+    return `v${Date.now()}`;
+  }
+
+  async optimizeParameters(userId: string) {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    const { data: trades, error } = await this.supabase
+      .from("trades")
+      .select("pnl, execution_time_ms")
+      .eq("user_id", userId)
+      .gte("created_at", thirtyDaysAgo);
+
+    if (error) {
+      console.error("optimizeParameters error", error);
+      return { success: false, reason: error.message };
     }
-  }
 
-  private discretizeState(spread: number, volume: number, confidence: number): string {
-    const spreadBucket = spread < 0.1 ? 'LOW' : spread < 0.3 ? 'MED' : 'HIGH'
-    const volumeBucket = volume < 100 ? 'LOW' : volume < 1000 ? 'MED' : 'HIGH'
-    const confidenceBucket = confidence < 30 ? 'LOW' : confidence < 70 ? 'MED' : 'HIGH'
-    
-    return `${spreadBucket}_${volumeBucket}_${confidenceBucket}`
-  }
-
-  private getMaxQValue(qTable: Map<string, number>, state: string): number {
-    const actions = ['TRADE', 'SKIP']
-    let maxQ = -Infinity
-    
-    for (const action of actions) {
-      const qKey = `${state}_${action}`
-      const qValue = qTable.get(qKey) || 0
-      if (qValue > maxQ) maxQ = qValue
+    if (!trades || trades.length < 50) {
+      return { success: false, reason: "Dados insuficientes para otimiza��o" };
     }
-    
-    return maxQ === -Infinity ? 0 : maxQ
-  }
 
-  async predictOptimalAction(spread: number, volume: number, confidence: number): Promise<any> {
-    try {
-      if (!this.currentModel) {
-        return { action: 'SKIP', confidence: 0, reason: 'Modelo não carregado' }
-      }
-      
-      const state = this.discretizeState(spread, volume, confidence)
-      const qTable = new Map(Object.entries(this.currentModel.parameters))
-      
-      const tradeQ = qTable.get(`${state}_TRADE`) || 0
-      const skipQ = qTable.get(`${state}_SKIP`) || 0
-      
-      const action = tradeQ > skipQ ? 'TRADE' : 'SKIP'
-      const actionConfidence = Math.abs(tradeQ - skipQ) * 10 // Amplificar diferença
-      
-      return {
-        action,
-        confidence: Math.min(actionConfidence, 100),
-        qValues: { trade: tradeQ, skip: skipQ },
-        state
-      }
-      
-    } catch (error) {
-      console.error('Erro na predição:', error)
-      return { action: 'SKIP', confidence: 0, reason: error.message }
+    const totalTrades = trades.length;
+    const successfulTrades = trades.filter((t) => (t.pnl ?? 0) > 0).length;
+    const totalPnL = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
+    const avgExecutionTime = trades.reduce((sum, t) => sum + (t.execution_time_ms ?? 0), 0) / totalTrades;
+    const successRate = (successfulTrades / totalTrades) * 100;
+    const newLearningRate = successRate > 60 ? 0.05 : 0.15;
+
+    const { error: updateError } = await this.supabase
+      .from("ai_settings")
+      .update({
+        learning_rate: newLearningRate,
+        performance_score: successRate,
+        prediction_accuracy: successRate,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("user_id", userId)
+      .eq("is_active", true);
+
+    if (updateError) {
+      console.error("optimizeParameters update error", updateError);
+      return { success: false, reason: updateError.message };
     }
+
+    return {
+      success: true,
+      metrics: {
+        totalTrades,
+        successRate,
+        totalPnL,
+        avgExecutionTime,
+        newLearningRate,
+        newPerformanceScore: successRate,
+      },
+    };
   }
 
-  private generateModelVersion(): string {
-    return `v${Date.now()}`
-  }
+  predictOptimalAction(spread: number, volume: number, confidence: number) {
+    const state = this.discretizeState(spread, volume, confidence);
+    const qTable = new Map(Object.entries(this.currentModel?.parameters ?? {}));
+    const tradeScore = qTable.get(`${state}_TRADE`) ?? 0;
+    const skipScore = qTable.get(`${state}_SKIP`) ?? 0;
 
-  async optimizeParameters(userId: string): Promise<any> {
-    try {
-      // Buscar performance histórica
-      const { data: trades } = await this.supabase
-        .from('trades')
-        .select('*')
-        .eq('user_id', userId)
-        .gte('created_at', new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString())
-      
-      if (!trades || trades.length < 50) {
-        return { success: false, reason: 'Dados insuficientes para otimização' }
-      }
-      
-      // Calcular métricas de performance
-      const totalTrades = trades.length
-      const successfulTrades = trades.filter(t => t.pnl > 0).length
-      const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0)
-      const avgExecutionTime = trades.reduce((sum, t) => sum + (t.execution_time_ms || 0), 0) / totalTrades
-      
-      // Otimizar parâmetros baseado na performance
-      const newLearningRate = successfulTrades / totalTrades > 0.6 ? 0.05 : 0.15
-      const newPerformanceScore = (successfulTrades / totalTrades) * 100
-      
-      await this.supabase
-        .from('ai_settings')
-        .update({
-          learning_rate: newLearningRate,
-          performance_score: newPerformanceScore,
-          prediction_accuracy: (successfulTrades / totalTrades) * 100,
-          updated_at: new Date().toISOString()
-        })
-        .eq('user_id', userId)
-        .eq('is_active', true)
-      
-      return {
-        success: true,
-        metrics: {
-          totalTrades,
-          successRate: (successfulTrades / totalTrades) * 100,
-          totalPnL,
-          avgExecutionTime,
-          newLearningRate,
-          newPerformanceScore
-        }
-      }
-      
-    } catch (error) {
-      console.error('Erro na otimização:', error)
-      return { success: false, reason: error.message }
+    if (tradeScore === 0 && skipScore === 0) {
+      return { action: "WAIT", confidence: 0 };
     }
+
+    return tradeScore >= skipScore
+      ? { action: "TRADE", confidence: tradeScore }
+      : { action: "SKIP", confidence: skipScore };
   }
 }
 
 serve(async (req) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    
-    const optimizer = new MLOptimizer(supabaseUrl, supabaseKey)
-    
-    if (req.method === 'POST') {
-      const { action, userId, spread, volume, confidence } = await req.json()
-      
-      switch (action) {
-        case 'load_model':
-          const model = await optimizer.loadModel(userId)
-          return new Response(JSON.stringify({ model }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'train_model':
-          const trainingResult = await optimizer.trainWithTradeData(userId)
-          return new Response(JSON.stringify({ trainingResult }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'predict':
-          const prediction = await optimizer.predictOptimalAction(spread, volume, confidence)
-          return new Response(JSON.stringify({ prediction }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        case 'optimize':
-          const optimization = await optimizer.optimizeParameters(userId)
-          return new Response(JSON.stringify({ optimization }), {
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-          
-        default:
-          return new Response(JSON.stringify({ error: 'Invalid action' }), {
-            status: 400,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-          })
-      }
+    const context = await requireUserContext(req);
+    const optimizer = new MLOptimizer(context.userClient);
+
+    if (req.method !== "POST") {
+      return jsonResponse({ error: "Method not allowed" }, 405);
     }
 
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
-    
+    const { action, userId = context.user.id, spread, volume, confidence } = await req.json();
+
+    switch (action) {
+      case "load_model": {
+        const model = await optimizer.loadModel(userId);
+        return jsonResponse({ model });
+      }
+      case "train_model": {
+        const trainingResult = await optimizer.trainWithTradeData(userId);
+        return jsonResponse({ trainingResult });
+      }
+      case "predict": {
+        if (spread === undefined || volume === undefined || confidence === undefined) {
+          return jsonResponse({ error: "Missing prediction parameters" }, 400);
+        }
+        await optimizer.loadModel(userId);
+        const prediction = optimizer.predictOptimalAction(spread, volume, confidence);
+        return jsonResponse({ prediction });
+      }
+      case "optimize": {
+        const optimization = await optimizer.optimizeParameters(userId);
+        return jsonResponse({ optimization });
+      }
+      default:
+        return jsonResponse({ error: "Invalid action" }, 400);
+    }
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-    })
+    console.error("ml-optimizer error", error);
+    const message = error instanceof Error ? error.message : "Unexpected error";
+    const status = message === "Unauthorized" ? 401 : 500;
+    return jsonResponse({ error: message }, status);
   }
-})
+});
+
+

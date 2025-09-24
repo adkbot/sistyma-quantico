@@ -14,6 +14,23 @@ interface RegionalConfig {
   status: 'full' | 'partial' | 'restricted';
 }
 
+interface CompatibilityReport {
+  region: string;
+  countryCode: string;
+  compatibility: {
+    status: RegionalConfig['status'];
+    spotTrading: boolean;
+    futuresTrading: boolean;
+    arbitrageCapable: boolean;
+  };
+  configuration: {
+    endpoint: string;
+    connectivity: boolean;
+    restrictions: string[];
+  };
+  recommendations: string[];
+}
+
 class RegionalValidator {
   private regionalConfigs: Map<string, RegionalConfig> = new Map([
     ['BR', {
@@ -59,17 +76,15 @@ class RegionalValidator {
   ]);
 
   async detectUserRegion(request: Request): Promise<string> {
-    // Tenta detectar região via headers CF-IPCountry (Cloudflare)
     const cfCountry = request.headers.get('CF-IPCountry');
     if (cfCountry) {
       return cfCountry;
     }
 
-    // Fallback para detecção via IP usando um serviço público
     try {
-      const clientIP = request.headers.get('x-forwarded-for')?.split(',')[0] || 
-                      request.headers.get('x-real-ip') ||
-                      'unknown';
+      const clientIP = request.headers.get('x-forwarded-for')?.split(',')[0]
+        || request.headers.get('x-real-ip')
+        || 'unknown';
       
       if (clientIP !== 'unknown') {
         const response = await fetch(`http://ip-api.com/json/${clientIP}`);
@@ -77,20 +92,19 @@ class RegionalValidator {
         return data.countryCode || 'DEFAULT';
       }
     } catch (error) {
-      console.log('Erro na detecção de região:', error);
+      console.log('Erro na detec??o de regi?o:', error);
     }
 
     return 'DEFAULT';
   }
 
   getRegionalConfig(countryCode: string): RegionalConfig {
-    // Mapeia códigos específicos para configurações
     const mapping: { [key: string]: string } = {
       'US': 'US',
       'CN': 'CN',
-      'HK': 'CN', // Hong Kong também restrito
+      'HK': 'CN',
       'BR': 'BR',
-      'DE': 'EU', 'FR': 'EU', 'IT': 'EU', 'ES': 'EU', 'NL': 'EU', // Europa
+      'DE': 'EU', 'FR': 'EU', 'IT': 'EU', 'ES': 'EU', 'NL': 'EU',
     };
 
     const configKey = mapping[countryCode] || 'DEFAULT';
@@ -114,7 +128,7 @@ class RegionalValidator {
     }
   }
 
-  async generateCompatibilityReport(countryCode: string): Promise<any> {
+  async generateCompatibilityReport(countryCode: string): Promise<CompatibilityReport> {
     const config = this.getRegionalConfig(countryCode);
     const connectivity = await this.validateBinanceConnectivity(config.binanceEndpoint);
 
@@ -144,13 +158,13 @@ class RegionalValidator {
       recommendations.push('Explore exchanges locais alternativos');
     } else if (config.status === 'partial') {
       recommendations.push('Trading limitado apenas ao spot market');
-      recommendations.push('Arbitragem spot-futures não disponível');
+      recommendations.push('Arbitragem spot-futures n?o dispon?vel');
     } else if (!connectivity) {
-      recommendations.push('Verifique sua conexão com a internet');
+      recommendations.push('Verifique sua conex?o com a internet');
       recommendations.push('Configure whitelist de IP na Binance');
     } else {
-      recommendations.push('Sistema totalmente compatível');
-      recommendations.push('Todas as funcionalidades disponíveis');
+      recommendations.push('Sistema totalmente compat?vel');
+      recommendations.push('Todas as funcionalidades dispon?veis');
     }
 
     return recommendations;
@@ -158,7 +172,6 @@ class RegionalValidator {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }

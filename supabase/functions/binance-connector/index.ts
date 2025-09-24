@@ -47,8 +47,8 @@ serve(async (req) => {
         const orderbook = await connector.getOrderBook(body.symbol);
         return jsonResponse({ success: true, orderbook });
       }
-            case "place_order": {
-        const required = ["symbol", "side", "type", "quantity"];
+      case "place_order": {
+        const required = ["symbol", "side", "type", "quantity"] as const;
         for (const key of required) {
           if (!(key in body)) {
             return jsonResponse({ success: false, error: `Missing ${key}` }, 400);
@@ -75,15 +75,6 @@ serve(async (req) => {
         });
         return jsonResponse({ success: true, order });
       }
-        const order = await connector.placeOrder({
-          symbol: body.symbol,
-          side: body.side,
-          type: body.type,
-          quantity: Number(body.quantity),
-          price: body.price !== undefined ? Number(body.price) : undefined,
-        });
-        return jsonResponse({ success: true, order });
-      }
       default:
         return jsonResponse({ success: false, error: "Invalid action" }, 400);
     }
@@ -94,5 +85,3 @@ serve(async (req) => {
     return jsonResponse({ success: false, error: message }, status);
   }
 });
-
-

@@ -44,3 +44,10 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+build/
+*.env*
+data/
+data/**
+keys.json
+.svelte-kit/
+.parcel-cache/

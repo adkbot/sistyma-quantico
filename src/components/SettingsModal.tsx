@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Key, Settings, Shield, Zap, Brain, AlertTriangle } from "lucide-react";
 import { backendClient } from "@/lib/backendClient";
+import { getKeysState, saveKeys } from "@/api/client";
 import { useToast } from "@/hooks/use-toast";
 
 interface SettingsModalProps {
@@ -21,8 +22,11 @@ interface SettingsModalProps {
 interface ApiKeyState {
   binanceKey: string;
   binanceSecret: string;
+  mode: 'spot' | 'futures';
   testnet: boolean;
   configured: boolean;
+  apiKeyMask: string;
+  updatedAt: string | null;
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
@@ -30,8 +34,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [apiKeys, setApiKeys] = useState<ApiKeyState>({
     binanceKey: "",
     binanceSecret: "",
+    mode: 'futures',
     testnet: false,
     configured: false,
+    apiKeyMask: '',
+    updatedAt: null,
   });
   const [loadingKeys, setLoadingKeys] = useState(false);
   const [savingKeys, setSavingKeys] = useState(false);
@@ -58,49 +65,130 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   });
 
   useEffect(() => {
+
     if (!isOpen) {
+
       return;
+
     }
 
+
+
     let isMounted = true;
+
     setLoadingKeys(true);
+
     setApiError(null);
 
-    backendClient
-      .getSettings()
-      .then((settings) => {
+
+
+    (async () => {
+
+      try {
+
+        const [settingsResult, keysResult] = await Promise.allSettled([
+
+          backendClient.getSettings(),
+
+          getKeysState(),
+
+        ]);
+
+
+
         if (!isMounted) {
+
           return;
+
         }
 
-        setApiKeys((prev) => ({
-          ...prev,
-          configured: settings.apiKeys.configured,
-          testnet: settings.apiKeys.testnet,
-          binanceKey: '',
-          binanceSecret: '',
-        }));
 
-        setTradingParams(settings.tradingParams);
-        setAiSettings(settings.aiSettings);
-        setRiskSettings(settings.riskSettings);
-      })
-      .catch((err: unknown) => {
-        if (!isMounted) {
-          return;
+
+        if (settingsResult.status === 'fulfilled') {
+
+          const settings = settingsResult.value;
+
+          setTradingParams(settings.tradingParams);
+
+          setAiSettings(settings.aiSettings);
+
+          setRiskSettings(settings.riskSettings);
+
+        } else {
+
+          const message =
+
+            (settingsResult.reason as Error)?.message ?? 'Erro ao carregar configuracoes.';
+
+          setApiError(message);
+
         }
-        setApiError((err as Error)?.message ?? 'Erro ao carregar configurações.');
-      })
-      .finally(() => {
+
+
+
+        if (keysResult.status === 'fulfilled') {
+
+          const state = keysResult.value;
+
+          setApiKeys((prev) => ({
+
+            ...prev,
+
+            configured: Boolean(state?.configured),
+
+            mode: state?.mode === 'spot' ? 'spot' : 'futures',
+
+            testnet: Boolean(state?.testnet),
+
+            apiKeyMask: state?.apiKeyMask ?? '',
+
+            updatedAt: state?.updatedAt ?? null,
+
+            binanceKey: '',
+
+            binanceSecret: '',
+
+          }));
+
+        } else if (keysResult.status === 'rejected') {
+
+          console.error('Erro ao carregar estado das chaves', keysResult.reason);
+
+        }
+
+      } catch (error) {
+
+        if (!isMounted) {
+
+          return;
+
+        }
+
+        setApiError((error as Error)?.message ?? 'Erro ao carregar configuracoes.');
+
+      } finally {
+
         if (isMounted) {
+
           setLoadingKeys(false);
+
         }
-      });
+
+      }
+
+    })();
+
+
 
     return () => {
+
       isMounted = false;
+
     };
+
   }, [isOpen]);
+
+
 
   useEffect(() => {
     if (!isOpen) {
@@ -131,21 +219,27 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 
     setSavingKeys(true);
     try {
-      const settings = await backendClient.manageApiKeys('save', {
-        apiKey: apiKeys.binanceKey,
-        apiSecret: apiKeys.binanceSecret,
+      const result = await saveKeys({
+        apiKey: apiKeys.binanceKey.trim(),
+        apiSecret: apiKeys.binanceSecret.trim(),
         testnet: apiKeys.testnet,
+        mode: apiKeys.mode,
       });
+
+      const state = result?.state;
 
       toast({
         title: 'Chaves atualizadas',
-        description: 'Integração com a Binance configurada com sucesso.',
+        description: 'Integracao com a Binance configurada com sucesso.',
       });
 
       setApiKeys((prev) => ({
         ...prev,
-        configured: settings.apiKeys.configured,
-        testnet: settings.apiKeys.testnet,
+        configured: Boolean(state?.configured),
+        mode: state?.mode === 'spot' ? 'spot' : 'futures',
+        testnet: Boolean(state?.testnet ?? prev.testnet),
+        apiKeyMask: state?.apiKeyMask ?? '',
+        updatedAt: state?.updatedAt ?? null,
         binanceKey: '',
         binanceSecret: '',
       }));
@@ -161,6 +255,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
       setSavingKeys(false);
     }
   };
+
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -221,7 +316,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     <Input
                       id="binance-key"
                       type="password"
-                      placeholder={apiKeys.configured ? "Chave configurada" : "Sua chave da API Binance"}
+                      placeholder={apiKeys.apiKeyMask ? `Chave configurada (${apiKeys.apiKeyMask})` : "Sua chave da API Binance"}
                       value={apiKeys.binanceKey}
                       onChange={(e) => setApiKeys((prev) => ({ ...prev, binanceKey: e.target.value }))}
                       disabled={loadingKeys || savingKeys}
@@ -234,7 +329,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     <Input
                       id="binance-secret"
                       type="password"
-                      placeholder={apiKeys.configured ? "Chave secreta armazenada" : "Sua chave secreta da Binance"}
+                      placeholder={apiKeys.apiKeyMask ? "Chave secreta armazenada" : "Sua chave secreta da Binance"}
                       value={apiKeys.binanceSecret}
                       onChange={(e) => setApiKeys((prev) => ({ ...prev, binanceSecret: e.target.value }))}
                       disabled={loadingKeys || savingKeys}
@@ -260,7 +355,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 <div className="flex items-center space-x-2 pt-4">
                   <Badge variant="outline" className="text-accent">
                     <div className="w-2 h-2 rounded-full bg-accent mr-2" />
-                    {apiKeys.configured ? "Binance conectada" : "Conexão pendente"}
+                    {apiKeys.configured ? "Binance conectada" : "Conexao pendente"}
                   </Badge>
                   <Badge variant="outline">Proteção via controle de acesso local</Badge>
                 </div>

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { requireUserContext } from "../_shared/supabaseClient.ts";\nimport type { createAdminClient } from "../_shared/supabaseClient.ts";
+import { requireUserContext } from "../_shared/supabaseClient.ts";
+import type { createAdminClient } from "../_shared/supabaseClient.ts";
 import { BinanceConnector, loadBinanceCredentials } from "../_shared/binance.ts";
 
 const corsHeaders = {
@@ -8,6 +9,18 @@ const corsHeaders = {
 };
 
 type AdminClient = ReturnType<typeof createAdminClient>;
+type MarketDataRow = {
+  symbol: string | null;
+  bid_price: number | null;
+  ask_price: number | null;
+  spread: number | null;
+  volume_24h?: number | null;
+};
+type BalanceRow = {
+  asset: string | null;
+  total_balance: number | null;
+};
+
 interface TradeOpportunity {
   pair: string;
   bidPrice: number;
@@ -34,35 +47,45 @@ class TradingEngine {
 
   async findArbitrageOpportunities(): Promise<TradeOpportunity[]> {
     const fiveSecondsAgo = new Date(Date.now() - 5000).toISOString();
-    const { data: marketData, error } = await this.supabase
+    const { data: rawMarketData, error } = await this.supabase
       .from("market_data_cache")
-      .select("symbol, bid_price, ask_price, spread, source, updated_at")
+      .select("symbol, bid_price, ask_price, spread, volume_24h, updated_at")
       .gte("updated_at", fiveSecondsAgo);
 
-    if (error || !marketData) {
+    if (error || !rawMarketData) {
       console.error("Market data fetch error", error);
       return [];
     }
 
-    const opportunities: TradeOpportunity[] = [];
-    const grouped = marketData.reduce((acc: Record<string, any[]>, row: any) => {
-      if (!acc[row.symbol]) acc[row.symbol] = [];
-      acc[row.symbol].push(row);
-      return acc;
-    }, {} as Record<string, any[]>);
+    const marketData = rawMarketData as MarketDataRow[];
+    const grouped = new Map<string, MarketDataRow[]>();
 
-    for (const [pair, entries] of Object.entries(grouped)) {
+    for (const row of marketData) {
+      if (!row.symbol) continue;
+      const entries = grouped.get(row.symbol) ?? [];
+      entries.push(row);
+      grouped.set(row.symbol, entries);
+    }
+
+    const opportunities: TradeOpportunity[] = [];
+
+    for (const [pair, entries] of grouped.entries()) {
       if (entries.length < 2) continue;
 
-      const bestBid = Math.max(...entries.map((e) => Number(e.bid_price ?? 0)));
-      const bestAsk = Math.min(...entries.map((e) => Number(e.ask_price ?? 0)));
+      const bidCandidates = entries.map((entry) => Number(entry.bid_price ?? 0));
+      const askCandidates = entries.map((entry) => Number(entry.ask_price ?? 0));
+      const bestBid = Math.max(...bidCandidates);
+      const bestAsk = Math.min(...askCandidates);
 
-      if (!bestBid || !bestAsk || bestBid <= bestAsk) continue;
+      if (!Number.isFinite(bestBid) || !Number.isFinite(bestAsk) || bestBid <= bestAsk) {
+        continue;
+      }
 
       const spread = ((bestBid - bestAsk) / bestAsk) * 100;
       if (spread <= 0.05) continue;
 
-      const volume = Math.min(...entries.map((e) => Number(e.volume_24h ?? 0) || 1));
+      const volumeValues = entries.map((entry) => Number(entry.volume_24h ?? 0));
+      const volume = volumeValues.length > 0 ? Math.min(...volumeValues.filter((v) => v > 0)) || 0 : 0;
       const estimatedProfit = (bestBid - bestAsk) * Math.min(volume, 1);
 
       opportunities.push({
@@ -87,16 +110,18 @@ class TradingEngine {
 
   async executeTrade(opportunity: TradeOpportunity): Promise<boolean> {
     try {
-      const { data: balances, error: balanceError } = await this.supabase
+      const { data: rawBalances, error: balanceError } = await this.supabase
         .from("account_balances")
         .select("asset, total_balance")
         .eq("user_id", this.userId);
 
-      if (balanceError || !balances?.length) {
-        throw new Error("Insufficient account balance data");
+      if (balanceError) {
+        throw new Error(balanceError.message);
       }
 
-      const usdtBalance = balances.find((b: any) => b.asset === "USDT");
+      const balances = (rawBalances ?? []) as BalanceRow[];
+      const usdtBalance = balances.find((balance) => balance.asset === "USDT");
+
       if (!usdtBalance || Number(usdtBalance.total_balance ?? 0) <= 0) {
         throw new Error("No USDT balance available for trading");
       }
@@ -106,7 +131,6 @@ class TradingEngine {
         throw new Error("Calculated order quantity is zero");
       }
 
-      // Execute spot leg (buy low)
       await this.binance.placeOrder({
         market: "spot",
         symbol: opportunity.pair,
@@ -115,7 +139,6 @@ class TradingEngine {
         quantity: orderQty,
       });
 
-      // Execute futures leg (sell high)
       await this.binance.placeOrder({
         market: "futures",
         symbol: opportunity.pair,

@@ -6,14 +6,49 @@ import express from 'express';
 import type { Request, Response } from 'express';
 import { botRunner, loadConfig, writeConfig } from './bot';
 import { getSettings, updateSettings, saveApiKeys, clearApiKeys } from './state/settingsStore';
+import { getMaskedState, upsertUserKeys } from './lib/keyStore.js';
 import { getFuturesBalance, getMarketPrices } from './api/exchange';
 import { botState, type BotSnapshot } from './state/botState';
 import { logger } from './logger';
 import type { StartBotOptions, BotConfig } from './bot';
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+const ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:8083';
+const corsOptions = { origin: ORIGIN };
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+app.use(express.json({ limit: '1mb' }));
+
+const DEFAULT_USER_ID = 'default';
+
+app.get('/api/status', (_req, res) => {
+  res.json({ status: 'ok', ts: new Date().toISOString() });
+});
+
+app.get('/api/keys/state', (_req, res) => {
+  const state = getMaskedState(DEFAULT_USER_ID);
+  res.json(state);
+});
+
+app.post('/api/keys', (req, res) => {
+  const { apiKey, apiSecret, mode, testnet } = req.body ?? {};
+
+  if (!apiKey || !apiSecret) {
+    res.status(400).json({ ok: false, error: 'API key e secret sao obrigatorios.' });
+    return;
+  }
+
+  const normalizedMode = (() => {
+    if (mode === 'future') return 'futures';
+    if (mode === 'futures') return 'futures';
+    return mode === 'spot' ? 'spot' : 'futures';
+  })();
+
+  upsertUserKeys(DEFAULT_USER_ID, { apiKey, apiSecret, mode: normalizedMode, testnet: Boolean(testnet) });
+  res.json({ ok: true, state: getMaskedState(DEFAULT_USER_ID) });
+});
 
 function sendSnapshot(res: Response): void {
   const snapshot = botState.getSnapshot();

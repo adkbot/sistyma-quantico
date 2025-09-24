@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -43,7 +43,7 @@ const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isRunning }) => {
   });
   const [isChecking, setIsChecking] = useState(false);
 
-  const checkSystemStatus = async () => {
+  const checkSystemStatus = useCallback(async () => {
     setIsChecking(true);
 
     try {
@@ -68,12 +68,12 @@ const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isRunning }) => {
       }));
     } finally {
       setIsChecking(false);
-    }
-  };
-
-    useEffect(() => {
-    checkSystemStatus();
+    }
   }, [isRunning]);
+
+  useEffect(() => {
+    checkSystemStatus();
+  }, [checkSystemStatus]);
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -260,3 +260,7 @@ const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isRunning }) => {
 };
 
 export default SystemStatusPanel;
+
+
+
+

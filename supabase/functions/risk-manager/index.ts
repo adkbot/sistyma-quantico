@@ -17,6 +17,40 @@ type RiskAssessment = {
   maxPositionSize: number;
 };
 
+type RiskSettingsRow = {
+  max_portfolio_risk?: number | null;
+  daily_loss_limit?: number | null;
+  max_consecutive_losses?: number | null;
+  max_daily_trades?: number | null;
+  max_position_size_percentage?: number | null;
+};
+
+type AccountBalanceRow = {
+  spot_balance: number | null;
+  futures_balance: number | null;
+};
+
+type TradeRow = {
+  pnl: number | null;
+  quantity: number | null;
+  entry_price: number | null;
+  status: string | null;
+  created_at: string;
+};
+
+type RiskMetrics = {
+  totalBalance: number;
+  currentExposure: number;
+  exposureRatio: number;
+  dailyPnL: number;
+  dailyPnLRatio: number;
+  consecutiveLosses: number;
+  volatility: number;
+  proposedExposure: number;
+  tradesLast24h: number;
+  riskSettings: RiskSettingsRow;
+};
+
 function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -35,8 +69,10 @@ class RiskManager {
       .single();
 
     if (riskError || !riskSettings) {
-      throw new Error("Configurações de risco não encontradas");
+      throw new Error("Configura??es de risco n?o encontradas");
     }
+
+    const typedSettings = riskSettings as RiskSettingsRow;
 
     const { data: balances, error: balancesError } = await this.supabase
       .from("account_balances")
@@ -58,21 +94,20 @@ class RiskManager {
     }
 
     const metrics = this.calculateRiskMetrics(
-      riskSettings,
-      balances ?? [],
-      recentTrades ?? [],
+      typedSettings,
+      (balances ?? []) as AccountBalanceRow[],
+      (recentTrades ?? []) as TradeRow[],
       tradeParams,
     );
 
-    return this.generateRiskAssessment(metrics, riskSettings, tradeParams);
+    return this.generateRiskAssessment(metrics, typedSettings);
   }
 
   private calculateRiskMetrics(
-    riskSettings: Record<string, number>,
-    balances: any[],
-    recentTrades: any[],
-    tradeParams: Record<string, number>,
-  ) {
+    riskSettings: RiskSettingsRow,
+    balances: AccountBalanceRow[],
+    recentTrades: TradeRow[]
+  ): RiskMetrics {
     const totalBalance = balances.reduce(
       (sum, balance) => sum + Number(balance.spot_balance ?? 0) + Number(balance.futures_balance ?? 0),
       0,
@@ -90,7 +125,7 @@ class RiskManager {
 
     let consecutiveLosses = 0;
     for (const trade of sortedTrades) {
-      if ((trade.pnl ?? 0) < 0) consecutiveLosses += 1;
+      if (Number(trade.pnl ?? 0) < 0) consecutiveLosses += 1;
       else break;
     }
 
@@ -117,7 +152,10 @@ class RiskManager {
     };
   }
 
-  private generateRiskAssessment(metrics: any, settings: any, tradeParams: Record<string, number>): RiskAssessment {
+  private generateRiskAssessment(
+    metrics: RiskMetrics,
+    settings: RiskSettingsRow
+  ): RiskAssessment {
     let riskScore = 0;
     const recommendations: string[] = [];
 
@@ -125,29 +163,29 @@ class RiskManager {
       ? (metrics.currentExposure + metrics.proposedExposure) / metrics.totalBalance
       : 1;
 
-    if (newExposureRatio > (settings.max_portfolio_risk ?? 10) / 100) {
+    if (newExposureRatio > (Number(settings.max_portfolio_risk ?? 10) / 100)) {
       riskScore += 30;
-      recommendations.push("Exposição do portfólio muito alta");
+      recommendations.push("Exposi??o do portf?lio muito alta");
     }
 
-    if (Math.abs(metrics.dailyPnLRatio) > (settings.daily_loss_limit ?? 5) / 100) {
+    if (Math.abs(metrics.dailyPnLRatio) > (Number(settings.daily_loss_limit ?? 5) / 100)) {
       riskScore += 25;
-      recommendations.push("Limite de perda diária atingido");
+      recommendations.push("Limite de perda di?ria atingido");
     }
 
-    if (metrics.consecutiveLosses >= (settings.max_consecutive_losses ?? 3)) {
+    if (metrics.consecutiveLosses >= Number(settings.max_consecutive_losses ?? 3)) {
       riskScore += 20;
       recommendations.push("Muitos trades perdedores consecutivos");
     }
 
-    if (metrics.volatility > (settings.max_portfolio_risk ?? 10) * 0.5) {
+    if (metrics.volatility > Number(settings.max_portfolio_risk ?? 10) * 0.5) {
       riskScore += 15;
       recommendations.push("Alta volatilidade detectada");
     }
 
-    if (metrics.tradesLast24h > (settings.max_daily_trades ?? 20)) {
+    if (metrics.tradesLast24h > Number(settings.max_daily_trades ?? 20)) {
       riskScore += 10;
-      recommendations.push("Limite de trades diários atingido");
+      recommendations.push("Limite de trades di?rios atingido");
     }
 
     let riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" = "LOW";
@@ -155,13 +193,13 @@ class RiskManager {
     else if (riskScore >= 50) riskLevel = "HIGH";
     else if (riskScore >= 30) riskLevel = "MEDIUM";
 
-    const maxPositionSizePercentage = settings.max_position_size_percentage ?? 10;
-    const maxPositionSize = metrics.totalBalance * (maxPositionSizePercentage / 100);
+    const maxPositionPercentage = Number(settings.max_position_size_percentage ?? 10) / 100;
+    const maxPositionSize = metrics.totalBalance * maxPositionPercentage;
 
     const allowTrade = riskLevel !== "CRITICAL" && riskScore < 80;
 
     if (!allowTrade) {
-      recommendations.push("Revisar parâmetros de risco antes de continuar");
+      recommendations.push("Revisar par?metros de risco antes de continuar");
     }
 
     return {
@@ -198,3 +236,4 @@ serve(async (req) => {
     return jsonResponse({ error: message }, status);
   }
 });
+

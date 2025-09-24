@@ -17,6 +17,15 @@ type MarketData = {
   timestamp: number;
 };
 
+interface BinanceTickerMessage {
+  e?: string;
+  s: string;
+  b: string | number;
+  a: string | number;
+  v: string | number;
+  E: number;
+}
+
 class RealTimeWebSocketManager {
   private supabase: SupabaseClient;
   private binanceWS: WebSocket | null = null;
@@ -49,7 +58,7 @@ class RealTimeWebSocketManager {
 
       this.binanceWS.onmessage = async (event) => {
         try {
-          const payload = JSON.parse(event.data);
+          const payload = JSON.parse(event.data) as BinanceTickerMessage;
           await this.processBinanceData(payload);
         } catch (error) {
           console.error("Binance message error", error);
@@ -71,7 +80,7 @@ class RealTimeWebSocketManager {
     }
   }
 
-  private async processBinanceData(data: any): Promise<void> {
+  private async processBinanceData(data: BinanceTickerMessage): Promise<void> {
     if (data?.e !== "24hrTicker") return;
 
     const marketData: MarketData = {

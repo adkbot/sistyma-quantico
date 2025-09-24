@@ -4,13 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --port 8083",
     "build": "vite build",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
-    "preview": "vite preview",
+    "preview": "vite preview --port 8083",
     "test": "jest",
-    "backend": "tsx src/server.ts"
+    "backend": "tsx src/server.ts",
+    "start": "node dist/server.js"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -45,6 +46,7 @@
     "@tanstack/react-query": "^5.83.0",
     "axios": "^1.12.2",
     "bottleneck": "^2.19.5",
+    "ccxt": "^4.3.98",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

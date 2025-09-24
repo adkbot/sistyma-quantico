@@ -25,6 +25,39 @@ type MLModel = {
   accuracyRate: number;
 };
 
+type TradeRecord = {
+  spread?: number | null;
+  quantity?: number | null;
+  ai_confidence?: number | null;
+  execution_time_ms?: number | null;
+  slippage?: number | null;
+  pnl?: number | null;
+};
+
+type TrainingSample = {
+  spread: number;
+  volume: number;
+  aiConfidence: number;
+  executionTime: number;
+  slippage: number;
+  success: boolean;
+  pnl: number;
+  actualSlippage: number;
+};
+
+type ReinforcementUpdate = {
+  parameters: Record<string, number>;
+  performance: number;
+  learningRate: number;
+  accuracy: number;
+};
+
+type OptimizationTradeRecord = {
+  pnl: number | null;
+  execution_time_ms: number | null;
+};
+
+
 class MLOptimizer {
   private supabase: SupabaseClient;
   private currentModel: MLModel | null = null;
@@ -62,9 +95,9 @@ class MLOptimizer {
 
   async trainWithTradeData(userId: string) {
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: trades, error } = await this.supabase
+    const { data: rawTrades, error } = await this.supabase
       .from("trades")
-      .select("pnl, quantity, ai_confidence, execution_time_ms, slippage, created_at")
+      .select("pnl, quantity, spread, ai_confidence, execution_time_ms, slippage, created_at")
       .eq("user_id", userId)
       .gte("created_at", since)
       .order("created_at", { ascending: false })
@@ -75,10 +108,11 @@ class MLOptimizer {
       return { success: false, reason: error.message };
     }
 
-    if (!trades || trades.length < 10) {
+    if (!rawTrades || rawTrades.length < 10) {
       return { success: false, reason: "Dados insuficientes para treinamento" };
     }
 
+    const trades = rawTrades as TradeRecord[];
     const trainingData = this.prepareTrainingData(trades);
     const modelUpdate = await this.reinforcementLearning(trainingData);
 
@@ -119,20 +153,20 @@ class MLOptimizer {
     };
   }
 
-  private prepareTrainingData(trades: any[]) {
+  private prepareTrainingData(trades: TradeRecord[]): TrainingSample[] {
     return trades.map((trade) => ({
-      spread: trade.spread ?? 0,
-      volume: trade.quantity ?? 0,
-      aiConfidence: trade.ai_confidence ?? 0,
-      executionTime: trade.execution_time_ms ?? 0,
-      slippage: trade.slippage ?? 0,
-      success: (trade.pnl ?? 0) > 0,
-      pnl: trade.pnl ?? 0,
-      actualSlippage: trade.slippage ?? 0,
+      spread: Number(trade.spread ?? 0),
+      volume: Number(trade.quantity ?? 0),
+      aiConfidence: Number(trade.ai_confidence ?? 0),
+      executionTime: Number(trade.execution_time_ms ?? 0),
+      slippage: Number(trade.slippage ?? 0),
+      success: Number(trade.pnl ?? 0) > 0,
+      pnl: Number(trade.pnl ?? 0),
+      actualSlippage: Number(trade.slippage ?? 0),
     }));
   }
 
-  private async reinforcementLearning(trainingData: any[]) {
+  private async reinforcementLearning(trainingData: TrainingSample[]): Promise<ReinforcementUpdate> {
     const qTable = new Map<string, number>();
     const learningRate = 0.1;
     const discountFactor = 0.95;
@@ -185,7 +219,7 @@ class MLOptimizer {
 
   async optimizeParameters(userId: string) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-    const { data: trades, error } = await this.supabase
+    const { data: rawTrades, error } = await this.supabase
       .from("trades")
       .select("pnl, execution_time_ms")
       .eq("user_id", userId)
@@ -196,10 +230,12 @@ class MLOptimizer {
       return { success: false, reason: error.message };
     }
 
-    if (!trades || trades.length < 50) {
+    if (!rawTrades || rawTrades.length < 50) {
       return { success: false, reason: "Dados insuficientes para otimização" };
     }
 
+    const trades = rawTrades as OptimizationTradeRecord[];
+    const trades = rawTrades as OptimizationTradeRecord[];
     const totalTrades = trades.length;
     const successfulTrades = trades.filter((t) => (t.pnl ?? 0) > 0).length;
     const totalPnL = trades.reduce((sum, t) => sum + (t.pnl ?? 0), 0);
@@ -298,5 +334,16 @@ serve(async (req) => {
     return jsonResponse({ error: message }, status);
   }
 });
+
+
+
+
+
+
+
+
+
+
+
 
 

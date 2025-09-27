@@ -76,6 +76,7 @@ Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-trick
 
 The Supabase Edge functions expect the following variables to be configured in your project settings:
 
-- `SUPABASE_SERVICE_ROLE_KEY` – service role key used by Edge Functions (never expose this in the client).
-- `LAEVITAS_API_KEY` – API key for Laevitas GEX analytics (kept server-side only).
+- `SUPABASE_SERVICE_ROLE_KEY` ï¿½ service role key used by Edge Functions (never expose this in the client).
+- `LAEVITAS_API_KEY` ï¿½ API key for Laevitas GEX analytics (kept server-side only).
 - `BINANCE_API_KEY`/`BINANCE_SECRET_KEY` are stored per user via the `api-keys` Edge Function and do not need to be declared globally.
+Pequeno ajuste para revisÃ£o do Codex.

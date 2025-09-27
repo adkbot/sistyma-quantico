@@ -79,5 +79,9 @@ The Supabase Edge functions expect the following variables to be configured in y
 - `SUPABASE_SERVICE_ROLE_KEY` � service role key used by Edge Functions (never expose this in the client).
 - `LAEVITAS_API_KEY` � API key for Laevitas GEX analytics (kept server-side only).
 - `BINANCE_API_KEY`/`BINANCE_SECRET_KEY` are stored per user via the `api-keys` Edge Function and do not need to be declared globally.
+<<<<<<< HEAD
 ## Atualização de Teste
 Este commit foi criado apenas para validar o fluxo de revisão no Codex.
+=======
+Pequeno ajuste para revisão do Codex.
+>>>>>>> 1c7c6d82d45345b2e9004605a1d74bad0b934f0a

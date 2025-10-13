@@ -1,81 +1,105 @@
-# Welcome to your Lovable project
+# Sistyma Quantico (Synapse-Arbitrage Mind)
 
-## Project info
+Aplicação completa para monitorar e operar arbitragem (spot vs futures e triangular) com painel em React + Tailwind e backend em Node/Express. Inclui testes com Jest, integração com Binance via `ccxt`, armazenamento seguro de chaves e SSE para streaming de estado em tempo real.
 
-**URL**: https://lovable.dev/projects/ea2e5160-1fd7-4c0a-af39-0db70095b683
+## Stack
+- Frontend: Vite + React + TypeScript + shadcn-ui + Tailwind CSS
+- Backend: Node + Express + TypeScript (executado com `tsx`)
+- Tests: Jest + ts-jest
+- Outros: `ccxt`, `axios`, `bottleneck`, `winston`
 
-## How can I edit this code?
+## Requisitos
+- Node.js >= 20 (recomendado LTS)
+- npm >= 9
 
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/ea2e5160-1fd7-4c0a-af39-0db70095b683) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
+## Instalação
 ```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+npm install
 ```
 
-**Edit a file directly in GitHub**
+## Desenvolvimento
+Execute frontend e backend em paralelo:
+```sh
+# Frontend (Vite) em http://localhost:8083
+npm run dev
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+# Backend (Express) em http://localhost:3001
+npm run backend
+```
 
-**Use GitHub Codespaces**
+No Windows você pode usar:
+```bat
+start-all.bat
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+Endpoints úteis do backend:
+- `GET /api/status` — health básico
+- `GET /api/state` — snapshot do estado do bot
+- `POST /api/bot/start` — inicia o bot
+- `POST /api/bot/stop` — para o bot
+- `GET /api/stream` — SSE com atualizações do estado
+- `GET /api/balances/spot/raw` — diagnóstico de saldos spot (Binance)
 
-## What technologies are used for this project?
+## Variáveis de ambiente
+Configure um arquivo `.env` na raiz (o `.gitignore` já impede versionamento):
 
-This project is built with:
+```env
+# Frontend
+VITE_SUPABASE_URL=
+VITE_SUPABASE_PUBLISHABLE_KEY=
+VITE_SUPABASE_PROJECT_ID=
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+# Binance (se usar via ambiente; normalmente as chaves são salvas via API)
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
 
-## How can I deploy this project?
+# Backend
+PORT=3001
+CORS_ORIGIN_LIST=http://localhost:8083
+# Caminho do cofre de chaves criptografado
+KEY_STORE=./data/keys.json
+# Segredo obrigatório para cifrar o cofre (AES-GCM)
+SERVER_SECRET=defina-um-segredo-forte-aqui
 
-Simply open [Lovable](https://lovable.dev/projects/ea2e5160-1fd7-4c0a-af39-0db70095b683) and click on Share -> Publish.
+# Integracoes (opcionais)
+REDIS_URL=
+DATABASE_URL=
+GEX_API_BASE=
+GEX_API_TOKEN=
+```
 
-## Can I connect a custom domain to my Lovable project?
+Observações importantes:
+- `SERVER_SECRET` é obrigatório. Sem ele, o backend encerra ao iniciar (ver `src/lib/keyStore.js`).
+- Chaves Binance podem ser cadastradas via `POST /api/keys` e ficam criptografadas em `data/keys.json`.
 
-Yes, you can!
+## Testes
+```sh
+npm test
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## Build
+Gera os artefatos do frontend em `dist/`:
+```sh
+npm run build
+```
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+## Deploy (base)
+- Frontend: sirva o conteúdo de `dist/` em um servidor estático (Nginx, Vercel, etc.).
+- Backend: execute `npm run backend` (dev) ou compile para JS antes de produção. Alternativas:
+  - Rodar com `tsx` em produção (simples, suficiente para POC);
+  - Adicionar bundler/compilação (ex.: `tsc` ou `tsup`) para gerar `dist/server.js` e usar `npm start`.
+- Coloque um proxy reverso (Nginx/Traefik) com TLS e libere apenas o necessário.
 
-## Environment Variables
+## CI (GitHub Actions)
+O repositório inclui um workflow básico para:
+- Instalar dependências com cache;
+- Rodar testes com Jest;
+- Build do frontend (Vite).
 
-The Supabase Edge functions expect the following variables to be configured in your project settings:
+## Segurança
+- `.env` e segredos estão excluídos no `.gitignore`.
+- As chaves dos usuários são guardadas criptografadas localmente.
+- Ajuste CORS em produção via `CORS_ORIGIN_LIST`.
 
-- `SUPABASE_SERVICE_ROLE_KEY` � service role key used by Edge Functions (never expose this in the client).
-- `LAEVITAS_API_KEY` � API key for Laevitas GEX analytics (kept server-side only).
-- `BINANCE_API_KEY`/`BINANCE_SECRET_KEY` are stored per user via the `api-keys` Edge Function and do not need to be declared globally.
+## Licença
+Este projeto é proprietário do autor do repositório. Ajuste esta seção conforme sua necessidade.

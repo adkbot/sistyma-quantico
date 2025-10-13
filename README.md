@@ -1,4 +1,5 @@
 # Sistyma Quantico (Synapse-Arbitrage Mind)
+[![CI](https://github.com/adkbot/sistyma-quantico/actions/workflows/ci.yml/badge.svg)](https://github.com/adkbot/sistyma-quantico/actions/workflows/ci.yml)
 
 Aplicação completa para monitorar e operar arbitragem (spot vs futures e triangular) com painel em React + Tailwind e backend em Node/Express. Inclui testes com Jest, integração com Binance via `ccxt`, armazenamento seguro de chaves e SSE para streaming de estado em tempo real.
 
@@ -95,6 +96,16 @@ O repositório inclui um workflow básico para:
 - Instalar dependências com cache;
 - Rodar testes com Jest;
 - Build do frontend (Vite).
+
+Badge de status acima. Você pode acessar os detalhes em Actions.
+
+## Releases
+Cada tag no formato `vX.Y.Z` dispara um workflow de release que compila o frontend e publica um artefato `dist.zip` anexado à Release.
+Para criar uma release:
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
 
 ## Segurança
 - `.env` e segredos estão excluídos no `.gitignore`.

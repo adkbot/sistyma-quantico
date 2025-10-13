@@ -1,6 +1,7 @@
 // src/state/settingsStore.ts
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { getMaskedState, upsertUserKeys, removeUserKeys } from '../lib/keyStore.js';
 import type {
   ApiAiSettings,
   ApiKeysSettings,
@@ -23,17 +24,23 @@ interface SettingsFileSchema {
     configured: boolean;
     testnet: boolean;
     lastUpdatedAt?: string | null;
+    mode?: 'spot' | 'futures';
+    apiKeyMask?: string;
   };
 }
+
+const DEFAULT_KEY_STATE = getMaskedState('default');
 
 const SETTINGS_PATH = new URL('../settings.json', import.meta.url);
 const ENV_PATH = new URL('../.env', import.meta.url);
 
 const DEFAULT_SETTINGS: SettingsState = {
   apiKeys: {
-    configured: Boolean(process.env.API_KEY && process.env.SECRET_KEY),
-    testnet: process.env.BINANCE_TESTNET === 'true',
-    lastUpdatedAt: null,
+    configured: DEFAULT_KEY_STATE.configured,
+    testnet: DEFAULT_KEY_STATE.testnet,
+    lastUpdatedAt: DEFAULT_KEY_STATE.updatedAt ?? null,
+    mode: DEFAULT_KEY_STATE.mode,
+    apiKeyMask: DEFAULT_KEY_STATE.apiKeyMask ?? '',
   },
   tradingParams: {
     minSpread: 0.15,
@@ -182,13 +189,14 @@ function applyEnvUpdates(updates: Record<string, string | undefined>): void {
 }
 
 function normalizeApiKeyState(fileValue: SettingsFileSchema['apiKeys']): ApiKeySettings {
-  const configured = Boolean(process.env.API_KEY && process.env.SECRET_KEY);
-  const testnetFlag = process.env.BINANCE_TESTNET === 'true';
+  const masked = getMaskedState('default');
 
   return {
-    configured,
-    testnet: fileValue?.testnet ?? testnetFlag,
-    lastUpdatedAt: fileValue?.lastUpdatedAt ?? null,
+    configured: masked.configured,
+    testnet: fileValue?.testnet ?? masked.testnet,
+    lastUpdatedAt: fileValue?.lastUpdatedAt ?? masked.updatedAt ?? null,
+    mode: masked.mode,
+    apiKeyMask: masked.apiKeyMask ?? '',
   };
 }
 
@@ -226,11 +234,12 @@ export function updateSettings(partial: Partial<Omit<SettingsState, 'apiKeys'>>)
   return getSettings();
 }
 
-export function saveApiKeys(params: { apiKey: string; apiSecret: string; testnet: boolean }): SettingsState {
-  applyEnvUpdates({
-    API_KEY: params.apiKey,
-    SECRET_KEY: params.apiSecret,
-    BINANCE_TESTNET: params.testnet ? 'true' : 'false',
+export function saveApiKeys(params: { apiKey: string; apiSecret: string; testnet: boolean; mode?: 'spot' | 'futures' }): SettingsState {
+  upsertUserKeys('default', {
+    apiKey: params.apiKey,
+    apiSecret: params.apiSecret,
+    testnet: params.testnet,
+    mode: params.mode || 'futures',
   });
 
   const current = readSettingsFile();
@@ -240,6 +249,8 @@ export function saveApiKeys(params: { apiKey: string; apiSecret: string; testnet
       configured: true,
       testnet: params.testnet,
       lastUpdatedAt: new Date().toISOString(),
+      mode: params.mode ?? 'futures',
+      apiKeyMask: `${params.apiKey.slice(0, 6)}***${params.apiKey.slice(-4)}`,
     },
   };
 
@@ -248,22 +259,29 @@ export function saveApiKeys(params: { apiKey: string; apiSecret: string; testnet
 }
 
 export function clearApiKeys(): SettingsState {
-  applyEnvUpdates({
-    API_KEY: undefined,
-    SECRET_KEY: undefined,
-  });
+  removeUserKeys('default');
 
   const current = readSettingsFile();
   const updated: SettingsFileSchema = {
     ...current,
     apiKeys: {
       configured: false,
-      testnet: current.apiKeys?.testnet ?? false,
+      testnet: false,
       lastUpdatedAt: new Date().toISOString(),
+      mode: 'futures',
+      apiKeyMask: '',
     },
   };
 
   writeSettingsFile(updated);
   return getSettings();
 }
+
+
+
+
+
+
+
+
 

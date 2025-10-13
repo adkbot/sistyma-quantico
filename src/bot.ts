@@ -5,16 +5,50 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { botState } from './state/botState';
-import { executeArbitrageOrder, getFuturesBalance, getMarketPrices } from './api/exchange';
-import { shouldExecuteTrade } from './logic/decision';
+import {
+  executeArbitrageOrder,
+  fetchBorrowAprPct,
+  fetchFundingRateBpsPer8h,
+  getFuturesTotalUSDT,
+  getSpotPortfolioValueUSDT,
+  getMarketPrices,
+  getSpotExchangeInfo,
+  getSpotTickers24h,
+  getFuturesExchangeInfo
+} from './api/exchange';
+import { computeNetEdgeBps, decideSide } from './engine/arbDecision';
+import type { ComputeNetEdgeResult } from './engine/arbDecision';
 import { logger } from './logger';
-import type { TradeParams } from './types';
+import type { FeesBpsConfig, Side, TradeParams } from '@/shared/types';
+import { scanTriangularUSDT, executeTriangularUSDT } from './engine/triangularArb';
 
 export interface BotConfig {
   tradingPair: string;
   minProfitPercentage: number;
   exchangeFeePercentage: number;
   checkIntervalSeconds: number;
+  placeOrders: boolean;
+  allowReverse: boolean;
+  spotMarginEnabled: boolean;
+  feesBps: FeesBpsConfig;
+  slippageBpsPerLeg: number;
+  minSpreadBpsLongCarry: number;
+  minSpreadBpsReverse: number;
+  considerFunding: boolean;
+  fundingHorizonHours: number;
+  maxBorrowAprPct: number;
+  // Escaneamento adicional
+  enableTriangular: boolean;
+  triMinQuoteVolumeUSDT: number;
+  triMinProfitBps: number; // 5 bps = 0.05%
+  spotFuturesMinProfitBps: number; // limiar m√≠nimo para execu√ß√£o
+  // Multi-par para Spot-Futuros
+  multiPairScanEnabled: boolean;
+  spotFuturesMinQuoteVolumeUSDT: number;
+  spotFuturesMaxSymbols: number;
+  // Or√ßamento da triangular
+  triBudgetUseDynamic: boolean; // quando true, usa ~90% do saldo USDT
+  triBudgetFixedUSDT: number; // quando triBudgetUseDynamic=false, or√ßamento fixo
 }
 
 export interface StartBotOptions {
@@ -22,9 +56,45 @@ export interface StartBotOptions {
   pollIntervalMs?: number;
   minProfitPercentage?: number;
   feePercentage?: number;
+  placeOrders?: boolean;
 }
 
 const CONFIG_PATH = new URL('../config.json', import.meta.url);
+
+const DEFAULT_CONFIG: BotConfig = {
+  tradingPair: 'BTCUSDT',
+  // Meta alvo de lucro por opera√ß√£o (apenas informativo hoje)
+  minProfitPercentage: 0.06,
+  exchangeFeePercentage: 0.001,
+  checkIntervalSeconds: 5,
+  placeOrders: false,
+  allowReverse: true,
+  spotMarginEnabled: false,
+  feesBps: { spotTaker: 10, futuresTaker: 4 },
+  slippageBpsPerLeg: 5,
+  // Limiar m√≠nimo para execu√ß√£o (0.05% = 5 bps)
+  minSpreadBpsLongCarry: 5,
+  minSpreadBpsReverse: 5,
+  considerFunding: true,
+  fundingHorizonHours: 8,
+  maxBorrowAprPct: 25,
+  enableTriangular: true,
+  triMinQuoteVolumeUSDT: 100_000,
+  triMinProfitBps: 5,
+  spotFuturesMinProfitBps: 5,
+  multiPairScanEnabled: true,
+  spotFuturesMinQuoteVolumeUSDT: 100_000,
+  spotFuturesMaxSymbols: 20,
+  triBudgetUseDynamic: true,
+  triBudgetFixedUSDT: 0
+};
+
+function cloneFees(config: FeesBpsConfig | undefined): FeesBpsConfig {
+  return {
+    spotTaker: config?.spotTaker ?? DEFAULT_CONFIG.feesBps.spotTaker,
+    futuresTaker: config?.futuresTaker ?? DEFAULT_CONFIG.feesBps.futuresTaker
+  };
+}
 
 export function loadConfig(): BotConfig {
   try {
@@ -32,34 +102,52 @@ export function loadConfig(): BotConfig {
     const parsed = JSON.parse(raw) as Partial<BotConfig>;
 
     return {
-      tradingPair: parsed.tradingPair ?? 'BTCUSDT',
-      minProfitPercentage: parsed.minProfitPercentage ?? 0.05,
-      exchangeFeePercentage: parsed.exchangeFeePercentage ?? 0.001,
-      checkIntervalSeconds: parsed.checkIntervalSeconds ?? 5,
+      tradingPair: parsed.tradingPair ?? DEFAULT_CONFIG.tradingPair,
+      minProfitPercentage: parsed.minProfitPercentage ?? DEFAULT_CONFIG.minProfitPercentage,
+      exchangeFeePercentage: parsed.exchangeFeePercentage ?? DEFAULT_CONFIG.exchangeFeePercentage,
+      checkIntervalSeconds: parsed.checkIntervalSeconds ?? DEFAULT_CONFIG.checkIntervalSeconds,
+      placeOrders: parsed.placeOrders ?? DEFAULT_CONFIG.placeOrders,
+      allowReverse: parsed.allowReverse ?? DEFAULT_CONFIG.allowReverse,
+      spotMarginEnabled: parsed.spotMarginEnabled ?? DEFAULT_CONFIG.spotMarginEnabled,
+      feesBps: cloneFees(parsed.feesBps),
+      slippageBpsPerLeg: parsed.slippageBpsPerLeg ?? DEFAULT_CONFIG.slippageBpsPerLeg,
+      minSpreadBpsLongCarry: parsed.minSpreadBpsLongCarry ?? DEFAULT_CONFIG.minSpreadBpsLongCarry,
+      minSpreadBpsReverse: parsed.minSpreadBpsReverse ?? DEFAULT_CONFIG.minSpreadBpsReverse,
+      considerFunding: parsed.considerFunding ?? DEFAULT_CONFIG.considerFunding,
+      fundingHorizonHours: parsed.fundingHorizonHours ?? DEFAULT_CONFIG.fundingHorizonHours,
+      maxBorrowAprPct: parsed.maxBorrowAprPct ?? DEFAULT_CONFIG.maxBorrowAprPct,
+      enableTriangular: parsed.enableTriangular ?? DEFAULT_CONFIG.enableTriangular,
+      triMinQuoteVolumeUSDT: parsed.triMinQuoteVolumeUSDT ?? DEFAULT_CONFIG.triMinQuoteVolumeUSDT,
+      triMinProfitBps: parsed.triMinProfitBps ?? DEFAULT_CONFIG.triMinProfitBps,
+      spotFuturesMinProfitBps: parsed.spotFuturesMinProfitBps ?? DEFAULT_CONFIG.spotFuturesMinProfitBps,
+      multiPairScanEnabled: parsed.multiPairScanEnabled ?? DEFAULT_CONFIG.multiPairScanEnabled,
+      spotFuturesMinQuoteVolumeUSDT: parsed.spotFuturesMinQuoteVolumeUSDT ?? DEFAULT_CONFIG.spotFuturesMinQuoteVolumeUSDT,
+      spotFuturesMaxSymbols: parsed.spotFuturesMaxSymbols ?? DEFAULT_CONFIG.spotFuturesMaxSymbols,
+      triBudgetUseDynamic: parsed.triBudgetUseDynamic ?? DEFAULT_CONFIG.triBudgetUseDynamic,
+      triBudgetFixedUSDT: parsed.triBudgetFixedUSDT ?? DEFAULT_CONFIG.triBudgetFixedUSDT
     };
   } catch (error) {
-    logger.error('Falha ao carregar config.json. Usando padrıes de contingÍncia.', { error });
-    return {
-      tradingPair: 'BTCUSDT',
-      minProfitPercentage: 0.05,
-      exchangeFeePercentage: 0.001,
-      checkIntervalSeconds: 5,
-    };
+    logger.error('Falha ao carregar config.json. Usando padroes de contingencia.', { error });
+    return { ...DEFAULT_CONFIG, feesBps: { ...DEFAULT_CONFIG.feesBps } };
   }
 }
 
 export function writeConfig(config: BotConfig): void {
-  writeFileSync(CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, 'utf-8');
+  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + '\n', 'utf-8');
 }
 
 function mergeOptions(base: BotConfig, options: StartBotOptions = {}): BotConfig {
+  const pollIntervalSeconds = options.pollIntervalMs
+    ? Math.max(1, Math.round(options.pollIntervalMs / 1000))
+    : base.checkIntervalSeconds;
+
   return {
+    ...base,
     tradingPair: options.symbol ?? base.tradingPair,
     minProfitPercentage: options.minProfitPercentage ?? base.minProfitPercentage,
     exchangeFeePercentage: options.feePercentage ?? base.exchangeFeePercentage,
-    checkIntervalSeconds: options.pollIntervalMs
-      ? Math.max(1, Math.round(options.pollIntervalMs / 1000))
-      : base.checkIntervalSeconds,
+    checkIntervalSeconds: pollIntervalSeconds,
+    placeOrders: options.placeOrders ?? base.placeOrders
   };
 }
 
@@ -81,26 +169,74 @@ function waitWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+function inferBaseAsset(symbol: string): string {
+  const upper = symbol.toUpperCase();
+  const knownQuotes = ['USDT', 'BUSD', 'USDC', 'BTC', 'ETH', 'EUR', 'BRL', 'TRY', 'BNB'];
+
+  for (const quote of knownQuotes) {
+    if (upper.endsWith(quote)) {
+      return upper.slice(0, upper.length - quote.length);
+    }
+  }
+
+  return upper.slice(0, Math.max(upper.length - 4, 1));
+}
+
+function determineNoTradeReason(
+  prices: { spot: number; futuros: number },
+  config: BotConfig,
+  metrics: ComputeNetEdgeResult,
+  borrowAprPct: number
+): string {
+  if (prices.futuros === prices.spot) {
+    return 'basis_flat';
+  }
+
+  if (prices.futuros > prices.spot) {
+    if (metrics.netLongCarry < config.minSpreadBpsLongCarry) {
+      return 'long_edge_below_threshold';
+    }
+    return 'basis_condition_not_met';
+  }
+
+  if (!config.allowReverse) {
+    return 'reverse_disabled';
+  }
+
+  if (!config.spotMarginEnabled) {
+    return 'reverse_blocked_no_margin';
+  }
+
+  if (borrowAprPct > config.maxBorrowAprPct) {
+    return 'reverse_borrow_apr_exceeds';
+  }
+
+  if (metrics.netReverseCarry < config.minSpreadBpsReverse) {
+    return 'reverse_edge_below_threshold';
+  }
+
+  return 'basis_condition_not_met';
+}
+
 async function botLoop(config: BotConfig, signal: AbortSignal): Promise<void> {
   const pollIntervalMs = config.checkIntervalSeconds * 1000;
   const symbol = config.tradingPair;
-  const minProfitPercentage = config.minProfitPercentage;
-  const feePercentage = config.exchangeFeePercentage;
 
   botState.initialize(symbol, pollIntervalMs);
   botState.setRunning(true);
 
   while (!signal.aborted) {
     try {
-      const capital = await getFuturesBalance();
+      const capital = await getFuturesTotalUSDT();
 
       if (signal.aborted) {
         break;
       }
 
       if (capital <= 0) {
-        logger.warn('Sem capital disponÌvel na carteira de futuros. Aguardando...');
-        botState.updateBalanceFromFutures(0, 0);
+        logger.warn('Sem capital disponivel na carteira de futuros. Aguardando...');
+        const spotOnly = await getSpotPortfolioValueUSDT();
+        botState.updateBalances(spotOnly, 0, 0);
         botState.setLastCycle();
         await waitWithAbort(pollIntervalMs, signal);
         continue;
@@ -112,62 +248,157 @@ async function botLoop(config: BotConfig, signal: AbortSignal): Promise<void> {
         break;
       }
 
-      if (prices.spot <= 0) {
-        logger.warn('PreÁo do spot inv·lido recebido. Ignorando ciclo.', prices);
-        botState.updateBalanceFromFutures(capital, 0);
+      if (prices.spot <= 0 || prices.futuros <= 0) {
+        logger.warn('Preco invalido recebido. Ignorando ciclo.', prices);
+        const spotNow = await getSpotPortfolioValueUSDT();
+        botState.updateBalances(spotNow, capital, 0);
         botState.setLastCycle();
         await waitWithAbort(pollIntervalMs, signal);
         continue;
       }
 
-      botState.updateBalanceFromFutures(capital, prices.spot);
+      {
+        const spotNow = await getSpotPortfolioValueUSDT();
+        botState.updateBalances(spotNow, capital, prices.spot);
+      }
 
       const amount = capital / prices.spot;
 
       if (!Number.isFinite(amount) || amount <= 0) {
-        logger.warn('Quantidade calculada inv·lida. Aguardando prÛximo ciclo.', { amount, capital, prices });
+        logger.warn('Quantidade calculada invalida. Aguardando proximo ciclo.', { amount, capital, prices });
         botState.setLastCycle();
         await waitWithAbort(pollIntervalMs, signal);
         continue;
       }
 
-      const tradeParams: TradeParams = {
-        buyPrice: prices.spot,
-        sellPrice: prices.futuros,
-        amount,
-        feePercentage,
+      const spread = prices.futuros - prices.spot;
+      const baseAsset = inferBaseAsset(symbol);
+
+      const [fundingRateBpsPer8h, borrowAprPctRaw] = await Promise.all([
+        fetchFundingRateBpsPer8h(symbol),
+        config.spotMarginEnabled ? fetchBorrowAprPct(baseAsset) : Promise.resolve(0)
+      ]);
+
+      const borrowAprPct = Math.max(0, borrowAprPctRaw);
+      const metrics = computeNetEdgeBps({
+        spot: prices.spot,
+        futures: prices.futuros,
+        feesBps: config.feesBps,
+        slippageBpsPerLeg: config.slippageBpsPerLeg,
+        considerFunding: config.considerFunding,
+        fundingRateBpsPer8h,
+        fundingHorizonHours: config.fundingHorizonHours,
+        borrowAprPct
+      });
+
+      const side = decideSide({
+        spot: prices.spot,
+        futures: prices.futuros,
+        cfg: {
+          feesBps: config.feesBps,
+          slippageBpsPerLeg: config.slippageBpsPerLeg,
+          considerFunding: config.considerFunding,
+          fundingHorizonHours: config.fundingHorizonHours,
+          minSpreadBpsLongCarry: config.minSpreadBpsLongCarry,
+          minSpreadBpsReverse: config.minSpreadBpsReverse,
+          allowReverse: config.allowReverse,
+          spotMarginEnabled: config.spotMarginEnabled,
+          maxBorrowAprPct: config.maxBorrowAprPct
+        },
+        fundingRateBpsPer8h,
+        borrowAprPct
+      });
+
+      const feesTotalBps = (config.feesBps.spotTaker ?? 0) + (config.feesBps.futuresTaker ?? 0);
+      const slippageTotalBps = config.slippageBpsPerLeg * 2;
+
+      const payload: Record<string, unknown> = {
+        ts: new Date().toISOString(),
+        symbol,
+        spot: prices.spot,
+        fut: prices.futuros,
+        basis_bps: metrics.basisBps,
+        fees_bps: feesTotalBps,
+        slippage_bps: slippageTotalBps,
+        funding_bps: metrics.fundingBps,
+        borrow_bps: metrics.borrowBps,
+        net_longcarry_bps: metrics.netLongCarry,
+        net_reverse_bps: metrics.netReverseCarry,
+        min_long_bps: config.minSpreadBpsLongCarry,
+        min_reverse_bps: config.minSpreadBpsReverse,
+        allow_reverse: config.allowReverse,
+        spot_margin_enabled: config.spotMarginEnabled,
+        chosen: side,
+        dry_run: !config.placeOrders,
+        notional_usdt: Number(capital.toFixed(2))
       };
 
-      if (shouldExecuteTrade(tradeParams, minProfitPercentage)) {
-        logger.info('Oportunidade encontrada. Executando arbitragem...', { tradeParams });
+      if (side === 'NONE') {
+        payload.reason_if_none = determineNoTradeReason(prices, config, metrics, borrowAprPct);
+        console.log(JSON.stringify(payload));
+        botState.setLastCycle();
+        await waitWithAbort(pollIntervalMs, signal);
+        continue;
+      }
 
-        const tradeStart = performance.now();
-        const result = await executeArbitrageOrder(tradeParams, symbol);
-        const latencyMs = performance.now() - tradeStart;
+      // Oportunidade encontrada no par principal
+      {
+        const netEdgeBps = side === 'LONG_SPOT_SHORT_PERP' ? metrics.netLongCarry : metrics.netReverseCarry;
+        botState.setMessage(`Oportunidade spot-futuros detectada ‚Ä¢ ${symbol} ‚Ä¢ lado=${side} ‚Ä¢ net_bps=${netEdgeBps.toFixed(2)}`);
+      }
 
-        if (result.success) {
-          logger.info(`OperaÁ„o concluÌda com lucro estimado de ${result.profit.toFixed(2)}.`, {
-            executedAt: result.executedAt.toISOString(),
-            details: result.details,
-          });
+      const tradeParams: TradeParams = side === 'LONG_SPOT_SHORT_PERP'
+        ? {
+            buyPrice: prices.spot,
+            sellPrice: prices.futuros,
+            amount,
+            feePercentage: config.exchangeFeePercentage,
+            spread,
+            side
+          }
+        : {
+            buyPrice: prices.futuros,
+            sellPrice: prices.spot,
+            amount,
+            feePercentage: config.exchangeFeePercentage,
+            spread,
+            side
+          };
 
-          botState.recordTrade({
-            trade: tradeParams,
-            pair: symbol,
-            resultProfit: result.profit,
-            latencyMs,
-            feesUsd: tradeParams.amount * tradeParams.buyPrice * tradeParams.feePercentage,
-            slippage: Math.abs(tradeParams.sellPrice - tradeParams.buyPrice) * 0.0001,
-          });
+      payload.action = config.placeOrders ? 'LIVE_ENTER' : 'DRY_RUN_ENTER';
+      console.log(JSON.stringify(payload));
 
-          const updatedBalance = await getFuturesBalance();
-          botState.updateBalanceFromFutures(updatedBalance, prices.spot);
-          logger.info('Saldo atualizado apÛs execuÁ„o.', { updatedBalance });
-        } else {
-          logger.warn('ExecuÁ„o retornou sem sucesso. Verifique o retorno da corretora.', result.details);
-        }
+      if (!config.placeOrders) {
+        botState.setLastCycle();
+        await waitWithAbort(pollIntervalMs, signal);
+        continue;
+      }
+
+      logger.info('Executando arbitragem spot-futuros (par principal).', { side, symbol, amount: tradeParams.amount });
+      const tradeStart = performance.now();
+      const result = await executeArbitrageOrder(tradeParams, symbol);
+      const latencyMs = performance.now() - tradeStart;
+
+      if (result.success) {
+        logger.info(`Operacao concluida com lucro estimado de ${result.profit}.`, {
+          executedAt: result.executedAt.toISOString(),
+          details: result.details
+        });
+
+        botState.recordTrade({
+          trade: tradeParams,
+          pair: symbol,
+          resultProfit: result.profit,
+          latencyMs,
+          feesUsd: tradeParams.amount * tradeParams.sellPrice * tradeParams.feePercentage,
+          slippage: Math.abs(tradeParams.spread) * 0.0001
+        });
+
+        const [updatedFut, updatedSpot] = await Promise.all([getFuturesTotalUSDT(), getSpotPortfolioValueUSDT()]);
+        botState.updateBalances(updatedSpot, updatedFut, prices.spot);
+        logger.info('Saldo atualizado apos execucao.', { updatedBalance });
       } else {
-        logger.info('Nenhuma oportunidade encontrada nesse ciclo.', { spread: prices.futuros - prices.spot });
+        logger.warn('Execucao retornou sem sucesso. Verifique o retorno da corretora.', result.details);
       }
 
       botState.setLastCycle();
@@ -179,6 +410,161 @@ async function botLoop(config: BotConfig, signal: AbortSignal): Promise<void> {
 
     if (signal.aborted) {
       break;
+    }
+
+    // Escaneamento Spot-Futuros multi-par com volume alto
+    if (config.multiPairScanEnabled) {
+      try {
+        const [spotInfo, tickers, futInfo] = await Promise.all([
+          getSpotExchangeInfo(),
+          getSpotTickers24h(),
+          getFuturesExchangeInfo(),
+        ]);
+
+        const futSet = new Set(
+          futInfo.filter((f) => f.status === 'TRADING').map((f) => f.symbol)
+        );
+        const volMap = new Map<string, number>(
+          tickers.map((t) => [t.symbol, t.quoteVolume])
+        );
+
+        const candidates = spotInfo
+          .filter((s) => s.status === 'TRADING' && s.quoteAsset === 'USDT')
+          .filter((s) => (volMap.get(s.symbol) ?? 0) >= config.spotFuturesMinQuoteVolumeUSDT)
+          .filter((s) => futSet.has(s.symbol))
+          .sort((a, b) => (volMap.get(b.symbol)! - volMap.get(a.symbol)!))
+          .slice(0, Math.max(1, config.spotFuturesMaxSymbols));
+
+        let executed = false;
+        for (const s of candidates) {
+          if (signal.aborted) break;
+
+          const p = await getMarketPrices(s.symbol);
+          if (p.spot <= 0 || p.futuros <= 0) continue;
+
+          const m = computeNetEdgeBps({
+            spot: p.spot,
+            futures: p.futuros,
+            feesBps: config.feesBps,
+            slippageBpsPerLeg: config.slippageBpsPerLeg,
+            considerFunding: config.considerFunding,
+            fundingRateBpsPer8h: await fetchFundingRateBpsPer8h(s.symbol),
+            fundingHorizonHours: config.fundingHorizonHours,
+            borrowAprPct: 0,
+          });
+
+          const sDec = decideSide({
+            spot: p.spot,
+            futures: p.futuros,
+            cfg: {
+              feesBps: config.feesBps,
+              slippageBpsPerLeg: config.slippageBpsPerLeg,
+              considerFunding: config.considerFunding,
+              fundingHorizonHours: config.fundingHorizonHours,
+              minSpreadBpsLongCarry: config.minSpreadBpsLongCarry,
+              minSpreadBpsReverse: config.minSpreadBpsReverse,
+              allowReverse: config.allowReverse,
+              spotMarginEnabled: config.spotMarginEnabled,
+              maxBorrowAprPct: config.maxBorrowAprPct,
+            },
+            fundingRateBpsPer8h: await fetchFundingRateBpsPer8h(s.symbol),
+            borrowAprPct: 0,
+          });
+
+          if (sDec === 'NONE') continue;
+
+          const netEdge = sDec === 'LONG_SPOT_SHORT_PERP' ? m.netLongCarry : m.netReverseCarry;
+          if (netEdge < config.spotFuturesMinProfitBps) continue;
+
+          // Oportunidade encontrada no escaneamento multi-par
+          botState.setMessage(`Oportunidade spot-futuros detectada ‚Ä¢ ${s.symbol} ‚Ä¢ lado=${sDec} ‚Ä¢ net_bps=${netEdge.toFixed(2)}`);
+
+          const qty = capital / p.spot;
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+
+          const trade: TradeParams = sDec === 'LONG_SPOT_SHORT_PERP'
+            ? {
+                buyPrice: p.spot,
+                sellPrice: p.futuros,
+                amount: qty,
+                feePercentage: config.exchangeFeePercentage,
+                spread: p.futuros - p.spot,
+                side: sDec,
+              }
+            : {
+                buyPrice: p.futuros,
+                sellPrice: p.spot,
+                amount: qty,
+                feePercentage: config.exchangeFeePercentage,
+                spread: p.futuros - p.spot,
+                side: sDec,
+              };
+
+          console.log(JSON.stringify({
+            ts: new Date().toISOString(),
+            pair: s.symbol,
+            type: 'spot-futuros',
+            dry_run: !config.placeOrders,
+            net_bps: netEdge,
+          }));
+
+          if (!config.placeOrders) continue;
+
+          logger.info('Executando arbitragem spot-futuros.', { side: sDec, symbol: s.symbol, amount: trade.amount });
+          const tStart = performance.now();
+          const res = await executeArbitrageOrder(trade, s.symbol);
+          const tLatency = performance.now() - tStart;
+
+          if (res.success) {
+            logger.info('Arbitragem spot-futuros conclu√≠da com sucesso.', { symbol: s.symbol, details: res.details });
+            botState.recordTrade({
+              trade,
+              pair: s.symbol,
+              resultProfit: res.profit,
+              latencyMs: tLatency,
+              feesUsd: trade.amount * trade.sellPrice * trade.feePercentage,
+              slippage: Math.abs(trade.spread) * 0.0001,
+            });
+            const [updatedFut, updatedSpot] = await Promise.all([getFuturesTotalUSDT(), getSpotPortfolioValueUSDT()]);
+            botState.updateBalances(updatedSpot, updatedFut, p.spot);
+            executed = true;
+            break;
+          } else {
+            logger.warn('Execu√ß√£o spot-futuros retornou sem sucesso.', res.details);
+          }
+        }
+      } catch (error) {
+        logger.warn('Falha no escaneamento spot-futuros multi-par.', { error });
+      }
+    }
+
+    // Escaneamento e Execu√ß√£o Triangular Spot (USDT)
+    if (config.enableTriangular) {
+      try {
+        const tri = await scanTriangularUSDT(
+          config.triMinQuoteVolumeUSDT,
+          config.feesBps,
+          config.slippageBpsPerLeg
+        );
+        if (tri.best && tri.best.netProfitBps >= config.triMinProfitBps) {
+          logger.info('Oportunidade triangular detectada', tri.best);
+          botState.setMessage(`Oportunidade triangular detectada ‚Ä¢ rota=${tri.best.route.join(' ‚Üí ')} ‚Ä¢ net_bps=${tri.best.netProfitBps.toFixed(2)}`);
+          if (config.placeOrders) {
+            // Or√ßamento: din√¢mico (~90% do saldo USDT) ou fixo conforme configura√ß√£o
+            const quoteUSDT = config.triBudgetUseDynamic
+              ? Number.MAX_SAFE_INTEGER
+              : Math.max(10, Math.min(2_000, config.triBudgetFixedUSDT || config.triMinQuoteVolumeUSDT));
+            const exec = await executeTriangularUSDT(tri.best, quoteUSDT);
+            if (exec.success) {
+              logger.info('Triangular executada com sucesso', { legs: exec.legs });
+            } else {
+              logger.warn('Falha/Abort na execu√ß√£o triangular', { error: exec.error, legs: exec.legs });
+            }
+          }
+        }
+      } catch (error) {
+        logger.warn('Falha no escaneamento triangular', { error });
+      }
     }
 
     await waitWithAbort(pollIntervalMs, signal);
@@ -208,7 +594,7 @@ class BotRunner {
 
   async start(options: StartBotOptions = {}): Promise<void> {
     if (this.isRunning()) {
-      logger.warn('SolicitaÁ„o de start ignorada: bot j· est· em execuÁ„o.');
+      logger.warn('Solicitacao de start ignorada: bot ja esta em execucao.');
       return this.runPromise ?? Promise.resolve();
     }
 
@@ -235,7 +621,7 @@ class BotRunner {
 
   async stop(): Promise<void> {
     if (!this.controller) {
-      logger.info('SolicitaÁ„o de stop ignorada: bot j· est· parado.');
+      logger.info('Solicitacao de stop ignorada: bot ja esta parado.');
       return;
     }
 
@@ -274,4 +660,3 @@ if (executedDirectly) {
       process.exit(1);
     });
 }
-

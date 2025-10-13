@@ -2,7 +2,7 @@
 
 import type { ApiBotSnapshot, ApiSettingsState, ApiSettingsUpdate } from '@/types/api';
 
-const API_BASE = import.meta.env.VITE_BACKEND_URL ?? 'http://localhost:4000';
+const API_BASE = import.meta.env.VITE_BACKEND_URL ?? import.meta.env.VITE_API_URL ?? 'http://localhost:3001';
 
 interface RequestOptions extends RequestInit {
   parse?: boolean;
@@ -102,3 +102,12 @@ export const backendClient = {
     return new EventSource(`${API_BASE}/api/stream`);
   },
 };
+
+
+
+
+
+
+
+
+

@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { ApiBotBalance, ApiBotMetrics, ApiBotSnapshot, ApiBotStatus, ApiBotTrade } from '../types/api';
-import type { TradeParams } from '../types';
+import type { TradeParams } from '@/shared/types';
 
 export type BotBalance = ApiBotBalance;
 export type BotTrade = ApiBotTrade;
@@ -57,6 +57,11 @@ class BotState {
     this.emitChange();
   }
 
+  setMessage(message: string): void {
+    this.status.lastMessage = message;
+    this.emitChange();
+  }
+
   recordError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
     this.status.lastError = {
@@ -88,6 +93,30 @@ class BotState {
     this.emitChange();
   }
 
+  updateBalances(spotBalance: number, futuresBalance: number, spotPrice: number): void {
+    const roundedSpot = Number(spotBalance.toFixed(2));
+    const roundedFut = Number(futuresBalance.toFixed(2));
+    const total = Number((roundedSpot + roundedFut).toFixed(2));
+
+    this.balances = [
+      {
+        asset: 'USDT',
+        spot_balance: roundedSpot,
+        futures_balance: roundedFut,
+        total_balance: total,
+      },
+    ];
+
+    this.status.lastMessage = `Saldo atualizado: ${roundedSpot.toFixed(2)} USDT spot e ${roundedFut.toFixed(2)} USDT em futuros.`;
+
+    if (spotPrice > 0) {
+      this.metrics.active_pairs = Math.max(this.metrics.active_pairs, 1);
+    }
+
+    this.updateMetrics(false);
+    this.emitChange();
+  }
+
   recordTrade(params: {
     trade: TradeParams;
     pair: string;
@@ -96,13 +125,15 @@ class BotState {
     feesUsd?: number;
     slippage?: number;
   }): BotTrade {
-    const { trade, pair, resultProfit, latencyMs, feesUsd = Math.abs(resultProfit) * trade.feePercentage, slippage = 0 } = params;
+    const { trade, pair, resultProfit, latencyMs, feesUsd = trade.amount * trade.sellPrice * trade.feePercentage, slippage = Math.abs(trade.spread) * 0.0001 } = params;
 
     const newTrade: BotTrade = {
       id: randomUUID(),
       timestamp: new Date().toISOString(),
       pair,
-      type: 'spot-futures',
+      type: trade.side,
+      direction: trade.side,
+      spread: trade.spread,
       entryPrice: trade.buyPrice,
       exitPrice: trade.sellPrice,
       volume: trade.amount,
@@ -179,3 +210,12 @@ class BotState {
 }
 
 export const botState = new BotState();
+
+
+
+
+
+
+
+
+

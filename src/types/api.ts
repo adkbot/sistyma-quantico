@@ -11,7 +11,9 @@ export interface ApiBotTrade {
   id: string;
   timestamp: string;
   pair: string;
-  type: 'spot-futures' | 'futures-spot';
+  type: 'LONG_SPOT_SHORT_PERP' | 'SHORT_SPOT_LONG_PERP';
+  direction: 'LONG_SPOT_SHORT_PERP' | 'SHORT_SPOT_LONG_PERP';
+  spread: number;
   entryPrice: number;
   exitPrice: number;
   volume: number;
@@ -56,6 +58,8 @@ export interface ApiKeysSettings {
   configured: boolean;
   testnet: boolean;
   lastUpdatedAt: string | null;
+  mode: 'spot' | 'futures';
+  apiKeyMask: string;
 }
 
 export interface ApiTradingParamsSettings {
@@ -90,3 +94,12 @@ export interface ApiSettingsUpdate {
   aiSettings?: Partial<ApiAiSettings>;
   riskSettings?: Partial<ApiRiskSettings>;
 }
+
+
+
+
+
+
+
+
+

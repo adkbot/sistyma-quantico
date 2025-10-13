@@ -19,19 +19,14 @@ type RealTimeBalancesProps = {
 };
 
 const RealTimeBalances: React.FC<RealTimeBalancesProps> = ({ balances, isLoading, error, onSync }) => {
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-    }).format(value);
+  // Exibir somente em USDT conforme solicitado
 
   const formatCrypto = (value: number, asset: string) => {
     const decimals = ['BTC', 'ETH'].includes(asset) ? 6 : 2;
     return `${value.toFixed(decimals)} ${asset}`;
   };
 
-  const getTotalBalanceUSD = () =>
+  const getTotalUSDT = () =>
     balances
       .filter((balance) => balance.asset === 'USDT')
       .reduce((sum, balance) => sum + balance.total_balance, 0);
@@ -80,9 +75,9 @@ const RealTimeBalances: React.FC<RealTimeBalancesProps> = ({ balances, isLoading
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Saldo Total (USD)</p>
+                  <p className="text-sm text-muted-foreground">Saldo Total (USDT)</p>
                   <p className="text-2xl font-bold text-accent">
-                    {formatCurrency(getTotalBalanceUSD())}
+                    {formatCrypto(getTotalUSDT(), 'USDT')}
                   </p>
                 </div>
                 <DollarSign className="h-8 w-8 text-accent" />
@@ -142,33 +137,25 @@ const RealTimeBalances: React.FC<RealTimeBalancesProps> = ({ balances, isLoading
                   <CardTitle className="text-lg flex items-center justify-between">
                     <span>{balance.asset}</span>
                     <Badge variant="outline" className="text-xs">
-                      {balance.spot_balance > 0 && balance.futures_balance > 0
-                        ? 'SPOT + FUTURES'
-                        : balance.spot_balance > 0
-                          ? 'SPOT'
-                          : 'FUTURES'}
+                      SPOT + FUTURES
                     </Badge>
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {balance.spot_balance > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-sm text-muted-foreground">Spot:</span>
-                        <span className="font-mono text-sm">
-                          {formatCrypto(balance.spot_balance, balance.asset)}
-                        </span>
-                      </div>
-                    )}
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Spot:</span>
+                      <span className="font-mono text-sm">
+                        {formatCrypto(balance.spot_balance, balance.asset)}
+                      </span>
+                    </div>
 
-                    {balance.futures_balance > 0 && (
-                      <div className="flex justify-between">
-                        <span className="text-sm text-muted-foreground">Futures:</span>
-                        <span className="font-mono text-sm">
-                          {formatCrypto(balance.futures_balance, balance.asset)}
-                        </span>
-                      </div>
-                    )}
+                    <div className="flex justify-between">
+                      <span className="text-sm text-muted-foreground">Futures:</span>
+                      <span className="font-mono text-sm">
+                        {formatCrypto(balance.futures_balance, balance.asset)}
+                      </span>
+                    </div>
 
                     <div className="border-t pt-2">
                       <div className="flex justify-between">
@@ -179,11 +166,7 @@ const RealTimeBalances: React.FC<RealTimeBalancesProps> = ({ balances, isLoading
                       </div>
                     </div>
 
-                    {balance.asset === 'USDT' && (
-                      <div className="text-center mt-2 text-xs text-muted-foreground">
-                        ~ {formatCurrency(balance.total_balance)}
-                      </div>
-                    )}
+                    {/* Sem conversão para moeda fiat. Mostrar apenas USDT. */}
                   </div>
                 </CardContent>
               </Card>
@@ -203,3 +186,4 @@ const RealTimeBalances: React.FC<RealTimeBalancesProps> = ({ balances, isLoading
 };
 
 export default RealTimeBalances;
+

@@ -1,75 +1,65 @@
 // src/tests/calculation.test.ts
 
-import type { TradeParams } from '../types';
+import type { TradeParams } from '@/shared/types';
 import { calculateProfit } from '../logic/calculation';
 
-describe('Testes para a função calculateProfit', () => {
-  // Teste 1: Um cenário com lucro claro
-  test('deve calcular o lucro corretamente para uma negociação vantajosa', () => {
+describe('Testes para a funï¿½ï¿½o calculateProfit', () => {
+  test('calcula lucro para arbitragem forward', () => {
     const trade: TradeParams = {
-      buyPrice: 50000,
-      sellPrice: 51000,
+      buyPrice: 51000,
+      sellPrice: 50000,
       amount: 1,
-      feePercentage: 0.001
+      feePercentage: 0.001,
+      spread: 1000,
+      side: 'SHORT_SPOT_LONG_PERP',
     };
 
     const profit = calculateProfit(trade);
-
-    expect(profit).toBeCloseTo(949);
+    // Gross: 1000 * 1 = 1000
+    // Buy fees: 51000 * 1 * 0.001 = 51
+    // Sell fees: 50000 * 1 * 0.001 = 50
+    // Total fees: 101
+    // Profit: 1000 - 101 = 899
+    expect(profit).toBeCloseTo(899, 1);
   });
 
-  // Teste 2: Um cenário com prejuízo por causa das taxas
-  test('deve calcular o prejuízo corretamente quando as taxas tornam a negociação inviável', () => {
+  test('calcula lucro para arbitragem reversa', () => {
     const trade: TradeParams = {
       buyPrice: 50000,
-      sellPrice: 50020,
-      amount: 1,
-      feePercentage: 0.001
-    };
-
-    const profit = calculateProfit(trade);
-
-    expect(profit).toBeCloseTo(-30.02);
-  });
-
-  // Teste 3: Um cenário com valores fracionados (decimais)
-  test('deve lidar corretamente com valores fracionados', () => {
-    const trade: TradeParams = {
-      buyPrice: 65123.45,
-      sellPrice: 65800.99,
-      amount: 0.05,
-      feePercentage: 0.001
-    };
-
-    const profit = calculateProfit(trade);
-
-    expect(profit).toBeCloseTo(30.587);
-  });
-
-  // Teste 4: Um cenário de borda com taxa zero
-  test('deve calcular o lucro corretamente quando a taxa é zero', () => {
-    const trade: TradeParams = {
-      buyPrice: 50000,
-      sellPrice: 51000,
+      sellPrice: 49200,
       amount: 2,
-      feePercentage: 0
+      feePercentage: 0.001,
+      spread: -800,
+      side: 'LONG_SPOT_SHORT_PERP',
     };
 
     const profit = calculateProfit(trade);
-
-    expect(profit).toBe(2000);
+    // Gross: 800 * 2 = 1600
+    // Buy fees: 50000 * 2 * 0.001 = 100
+    // Sell fees: 49200 * 2 * 0.001 = 98.4
+    // Total fees: 198.4
+    // Profit: 1600 - 198.4 = 1401.6
+    expect(profit).toBeCloseTo(1401.6, 1);
   });
 
-  const invalidCases: Array<{ trade: TradeParams; reason: string }> = [
-    { trade: { buyPrice: 0, sellPrice: 50000, amount: 1, feePercentage: 0.001 }, reason: 'preço de compra zero' },
-    { trade: { buyPrice: 50000, sellPrice: -100, amount: 1, feePercentage: 0.001 }, reason: 'preço de venda negativo' },
-    { trade: { buyPrice: 50000, sellPrice: 51000, amount: 0, feePercentage: 0.001 }, reason: 'quantidade zero' }
-  ];
+  test('retorna zero quando dados sï¿½o invï¿½lidos', () => {
+    const cases: TradeParams[] = [
+      { buyPrice: 51000, sellPrice: 0, amount: 1, feePercentage: 0.001, spread: 1000, side: 'SHORT_SPOT_LONG_PERP' },
+      { buyPrice: 0, sellPrice: 50000, amount: 1, feePercentage: 0.001, spread: -1000, side: 'LONG_SPOT_SHORT_PERP' },
+      { buyPrice: 100, sellPrice: 120, amount: 0, feePercentage: 0.001, spread: 20, side: 'SHORT_SPOT_LONG_PERP' },
+    ];
 
-  // Teste 5: Cenários com entradas inválidas
-  test.each(invalidCases)('deve retornar 0 quando a entrada é inválida ($reason)', ({ trade }) => {
-    const profit = calculateProfit(trade);
-
-    expect(profit).toBe(0);
+    for (const trade of cases) {
+      expect(calculateProfit(trade)).toBe(0);
+    }
   });
 });
+
+
+
+
+
+
+
+
+

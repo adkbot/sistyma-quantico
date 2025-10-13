@@ -122,7 +122,7 @@ const AIPanel: React.FC<AIPanelProps> = ({
                   <div className="flex justify-between items-center">
                     <span className="text-sm">Tamanho da Posição</span>
                     <div className="flex items-center space-x-2">
-                      <span className="text-sm font-mono">$25,000</span>
+                      <span className="text-sm font-mono">25,000 USDT</span>
                       <Activity className="h-3 w-3 text-primary" />
                     </div>
                   </div>

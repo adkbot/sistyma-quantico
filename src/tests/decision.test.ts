@@ -1,36 +1,69 @@
 // src/tests/decision.test.ts
 
-import { shouldExecuteTrade } from '../logic/decision';
-import type { TradeParams } from '../types';
+import { computeNetEdgeBps, decideSide } from '../engine/arbDecision';
 
-describe('Testes para a função de decisão shouldExecuteTrade', () => {
-  // Cenário 1: Deve executar, pois o lucro é maior que o mínimo
-  test('deve retornar TRUE quando o lucro excede o limite mínimo', () => {
-    const trade: TradeParams = { buyPrice: 50000, sellPrice: 50150, amount: 1, feePercentage: 0.001 };
-    const minProfitPercentage = 0.05;
+const baseCfg = {
+  feesBps: { spotTaker: 10, futuresTaker: 4 },
+  slippageBpsPerLeg: 5,
+  considerFunding: true,
+  fundingHorizonHours: 8,
+  minSpreadBpsLongCarry: 20,
+  minSpreadBpsReverse: 25,
+  allowReverse: true,
+  spotMarginEnabled: true,
+  maxBorrowAprPct: 25
+};
 
-    const decision = shouldExecuteTrade(trade, minProfitPercentage);
+describe('arbDecision helpers', () => {
+  test('computeNetEdgeBps calcula basis em bps corretamente', () => {
+    const metrics = computeNetEdgeBps({
+      spot: 100,
+      futures: 101,
+      feesBps: baseCfg.feesBps,
+      slippageBpsPerLeg: baseCfg.slippageBpsPerLeg,
+      considerFunding: false,
+      fundingRateBpsPer8h: 0,
+      fundingHorizonHours: baseCfg.fundingHorizonHours,
+      borrowAprPct: 0
+    });
 
-    expect(decision).toBe(true);
+    expect(metrics.basisBps).toBeCloseTo(100);
+    expect(metrics.netLongCarry).toBeLessThan(metrics.basisBps);
   });
 
-  // Cenário 2: Não deve executar, pois o lucro é muito baixo
-  test('deve retornar FALSE quando o lucro é positivo, mas abaixo do limite mínimo', () => {
-    const trade: TradeParams = { buyPrice: 50000, sellPrice: 50070, amount: 1, feePercentage: 0.001 };
-    const minProfitPercentage = 0.05;
+  test('decideSide retorna LONG_SPOT_SHORT_PERP quando spread atende o limiar', () => {
+    const side = decideSide({
+      spot: 100,
+      futures: 101,
+      cfg: baseCfg,
+      fundingRateBpsPer8h: 8,
+      borrowAprPct: 0
+    });
 
-    const decision = shouldExecuteTrade(trade, minProfitPercentage);
-
-    expect(decision).toBe(false);
+    expect(side).toBe('LONG_SPOT_SHORT_PERP');
   });
 
-  // Cenário 3: Não deve executar, pois o preço do Futuro é menor
-  test('deve retornar FALSE quando o preço do Spot é maior ou igual ao do Futuro', () => {
-    const trade: TradeParams = { buyPrice: 50100, sellPrice: 50000, amount: 1, feePercentage: 0.001 };
-    const minProfitPercentage = 0.05;
+  test('decideSide retorna SHORT_SPOT_LONG_PERP quando reverso esta permitido e atrativo', () => {
+    const side = decideSide({
+      spot: 101,
+      futures: 99.5,
+      cfg: { ...baseCfg, spotMarginEnabled: true },
+      fundingRateBpsPer8h: -4,
+      borrowAprPct: 5
+    });
 
-    const decision = shouldExecuteTrade(trade, minProfitPercentage);
+    expect(side).toBe('SHORT_SPOT_LONG_PERP');
+  });
 
-    expect(decision).toBe(false);
+  test('decideSide retorna NONE quando thresholds nao sao atendidos', () => {
+    const side = decideSide({
+      spot: 100,
+      futures: 100.1,
+      cfg: baseCfg,
+      fundingRateBpsPer8h: 0,
+      borrowAprPct: 0
+    });
+
+    expect(side).toBe('NONE');
   });
 });

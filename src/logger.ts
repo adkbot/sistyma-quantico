@@ -35,3 +35,11 @@ export const logger = createLogger({
     new transports.File({ filename: join(logDirectory, 'exceptions.log') })
   ]
 });
+
+
+
+
+
+
+
+

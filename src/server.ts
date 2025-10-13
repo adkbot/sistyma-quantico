@@ -7,18 +7,29 @@ import type { Request, Response } from 'express';
 import { botRunner, loadConfig, writeConfig } from './bot';
 import { getSettings, updateSettings, saveApiKeys, clearApiKeys } from './state/settingsStore';
 import { getMaskedState, upsertUserKeys } from './lib/keyStore.js';
-import { getFuturesBalance, getMarketPrices } from './api/exchange';
+import { getFuturesBalance, getMarketPrices, getSpotBalance, getSpotPortfolioValueUSDT, getFuturesTotalUSDT, getSpotBalancesRaw } from './api/exchange';
 import { botState, type BotSnapshot } from './state/botState';
 import { logger } from './logger';
 import type { StartBotOptions, BotConfig } from './bot';
 
 const app = express();
 
-const ORIGIN = process.env.CORS_ORIGIN || 'http://localhost:8083';
-const corsOptions = { origin: ORIGIN };
+// Permitir mÃºltiplas origens em desenvolvimento (8083 e 8084) e via env
+const DEFAULT_ORIGINS = ['http://localhost:8083', 'http://localhost:8084'];
+const ENV_ORIGINS = (process.env.CORS_ORIGIN_LIST || process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+const ALLOWED_ORIGINS = ENV_ORIGINS.length ? ENV_ORIGINS : DEFAULT_ORIGINS;
+
+// Em desenvolvimento, permitir qualquer origem para evitar bloqueios (serÃ¡ ajustado em produÃ§Ã£o via env)
+const corsOptions = {
+  origin: true,
+  credentials: true,
+};
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
 app.use(express.json({ limit: '1mb' }));
 
 const DEFAULT_USER_ID = 'default';
@@ -68,18 +79,41 @@ app.put('/api/config', (req, res) => {
   try {
     const body = req.body as Partial<BotConfig> | undefined;
     if (!body) {
-      res.status(400).json({ error: 'Configuração inválida.' });
+      res.status(400).json({ error: 'Configuraï¿½ï¿½o invï¿½lida.' });
       return;
     }
 
     const current = loadConfig();
 
-    const updated: BotConfig = {
-      tradingPair: body.tradingPair ?? current.tradingPair,
+  const updated: BotConfig = {
+    tradingPair: typeof body.tradingPair === 'string' ? body.tradingPair : current.tradingPair,
       minProfitPercentage: typeof body.minProfitPercentage === 'number' ? body.minProfitPercentage : current.minProfitPercentage,
       exchangeFeePercentage: typeof body.exchangeFeePercentage === 'number' ? body.exchangeFeePercentage : current.exchangeFeePercentage,
       checkIntervalSeconds: typeof body.checkIntervalSeconds === 'number' ? Math.max(1, Math.floor(body.checkIntervalSeconds)) : current.checkIntervalSeconds,
-    };
+      placeOrders: typeof body.placeOrders === 'boolean' ? body.placeOrders : current.placeOrders,
+      allowReverse: typeof body.allowReverse === 'boolean' ? body.allowReverse : current.allowReverse,
+      spotMarginEnabled: typeof body.spotMarginEnabled === 'boolean' ? body.spotMarginEnabled : current.spotMarginEnabled,
+      feesBps: {
+        spotTaker: typeof body.feesBps?.spotTaker === 'number' ? body.feesBps.spotTaker : current.feesBps.spotTaker,
+        futuresTaker: typeof body.feesBps?.futuresTaker === 'number' ? body.feesBps.futuresTaker : current.feesBps.futuresTaker
+      },
+      slippageBpsPerLeg: typeof body.slippageBpsPerLeg === 'number' ? body.slippageBpsPerLeg : current.slippageBpsPerLeg,
+      minSpreadBpsLongCarry: typeof body.minSpreadBpsLongCarry === 'number' ? body.minSpreadBpsLongCarry : current.minSpreadBpsLongCarry,
+      minSpreadBpsReverse: typeof body.minSpreadBpsReverse === 'number' ? body.minSpreadBpsReverse : current.minSpreadBpsReverse,
+      considerFunding: typeof body.considerFunding === 'boolean' ? body.considerFunding : current.considerFunding,
+      fundingHorizonHours: typeof body.fundingHorizonHours === 'number' ? Math.max(0, body.fundingHorizonHours) : current.fundingHorizonHours,
+      maxBorrowAprPct: typeof body.maxBorrowAprPct === 'number' ? body.maxBorrowAprPct : current.maxBorrowAprPct,
+      enableTriangular: typeof body.enableTriangular === 'boolean' ? body.enableTriangular : current.enableTriangular,
+      triMinQuoteVolumeUSDT: typeof body.triMinQuoteVolumeUSDT === 'number' ? body.triMinQuoteVolumeUSDT : current.triMinQuoteVolumeUSDT,
+      triMinProfitBps: typeof body.triMinProfitBps === 'number' ? body.triMinProfitBps : current.triMinProfitBps,
+    spotFuturesMinProfitBps: typeof body.spotFuturesMinProfitBps === 'number' ? body.spotFuturesMinProfitBps : current.spotFuturesMinProfitBps
+    ,
+    multiPairScanEnabled: typeof body.multiPairScanEnabled === 'boolean' ? body.multiPairScanEnabled : current.multiPairScanEnabled,
+    spotFuturesMinQuoteVolumeUSDT: typeof body.spotFuturesMinQuoteVolumeUSDT === 'number' ? body.spotFuturesMinQuoteVolumeUSDT : current.spotFuturesMinQuoteVolumeUSDT,
+    spotFuturesMaxSymbols: typeof body.spotFuturesMaxSymbols === 'number' ? Math.max(1, Math.floor(body.spotFuturesMaxSymbols)) : current.spotFuturesMaxSymbols,
+    triBudgetUseDynamic: typeof body.triBudgetUseDynamic === 'boolean' ? body.triBudgetUseDynamic : current.triBudgetUseDynamic,
+    triBudgetFixedUSDT: typeof body.triBudgetFixedUSDT === 'number' ? body.triBudgetFixedUSDT : current.triBudgetFixedUSDT
+  };
 
     writeConfig(updated);
 
@@ -90,7 +124,7 @@ app.put('/api/config', (req, res) => {
     res.json({ config: updated });
   } catch (error) {
     logger.error('Falha ao atualizar config.json.', { error });
-    res.status(500).json({ error: 'Erro ao salvar configuração.' });
+    res.status(500).json({ error: 'Erro ao salvar configuraï¿½ï¿½o.' });
   }
 });
 
@@ -98,20 +132,14 @@ app.post('/api/bot/start', (req, res) => {
   try {
     const options = (req.body ?? {}) as StartBotOptions;
 
-    botRunner
-      .start(options)
-      .then(() => {
-        sendSnapshot(res);
-      })
-      .catch((error) => {
-        logger.error('Falha ao iniciar o bot via API.', { error });
-        if (!res.headersSent) {
-          res.status(500).json({ error: 'Não foi possível iniciar o bot.' });
-        }
-      });
+    void botRunner.start(options).catch((error) => {
+      logger.error('Falha ao iniciar o bot via API (async).', { error });
+    });
+
+    sendSnapshot(res);
   } catch (error) {
     logger.error('Falha ao iniciar o bot via API.', { error });
-    res.status(500).json({ error: 'Não foi possível iniciar o bot.' });
+    res.status(500).json({ error: 'Nï¿½o foi possï¿½vel iniciar o bot.' });
   }
 });
 
@@ -121,7 +149,7 @@ app.post('/api/bot/stop', async (_req, res) => {
     sendSnapshot(res);
   } catch (error) {
     logger.error('Falha ao parar o bot via API.', { error });
-    res.status(500).json({ error: 'Não foi possível parar o bot.' });
+    res.status(500).json({ error: 'Nï¿½o foi possï¿½vel parar o bot.' });
   }
 });
 
@@ -130,26 +158,38 @@ app.post('/api/bot/reload-config', async (_req, res) => {
     const config = await botRunner.reloadConfig();
     res.json({ config });
   } catch (error) {
-    logger.error('Falha ao recarregar configuração.', { error });
-    res.status(500).json({ error: 'Não foi possível recarregar configuração.' });
+    logger.error('Falha ao recarregar configuraï¿½ï¿½o.', { error });
+    res.status(500).json({ error: 'Nï¿½o foi possï¿½vel recarregar configuraï¿½ï¿½o.' });
   }
 });
 
 app.post('/api/sync', async (_req, res) => {
   try {
     const config = botRunner.getConfig();
-    const [capital, prices] = await Promise.all([
-      getFuturesBalance(),
+    const [spot, futures, prices] = await Promise.all([
+      getSpotPortfolioValueUSDT(),
+      getFuturesTotalUSDT(),
       getMarketPrices(config.tradingPair),
     ]);
 
-    botState.updateBalanceFromFutures(capital, prices.spot);
+    botState.updateBalances(spot, futures, prices.spot);
     botState.setLastCycle();
 
     sendSnapshot(res);
   } catch (error) {
     logger.error('Falha ao sincronizar dados manualmente.', { error });
-    res.status(500).json({ error: 'Não foi possível sincronizar os dados.' });
+    res.status(500).json({ error: 'Nï¿½o foi possï¿½vel sincronizar os dados.' });
+  }
+});
+
+// Endpoint de diagnÃ³stico: retorna saldos spot brutos diretamente da Binance
+app.get('/api/balances/spot/raw', async (_req, res) => {
+  try {
+    const raw = await getSpotBalancesRaw();
+    res.json({ balances: raw });
+  } catch (error) {
+    logger.error('Falha ao obter saldos spot brutos.', { error });
+    res.status(500).json({ error: 'NÃ£o foi possÃ­vel obter saldos spot brutos.' });
   }
 });
 
@@ -158,6 +198,10 @@ app.get('/api/stream', (req, res) => {
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
+
+  // Log detalhado de conexÃµes SSE
+  const clientIp = (req.ip || req.socket.remoteAddress || 'unknown');
+  logger.info('SSE conectado', { clientIp, at: new Date().toISOString() });
 
   const send = (snapshot: BotSnapshot) => {
     res.write(`data: ${JSON.stringify(snapshot)}\n\n`);
@@ -171,11 +215,12 @@ app.get('/api/stream', (req, res) => {
 
   req.on('close', () => {
     unsubscribe();
+    logger.info('SSE desconectado', { clientIp, at: new Date().toISOString() });
     res.end();
   });
 });
 
-const port = Number.parseInt(process.env.PORT ?? '4000', 10);
+const port = Number.parseInt(process.env.PORT ?? '3001', 10);
 
 app.get('/api/system/status', async (_req, res) => {
   const settings = getSettings();
@@ -186,7 +231,7 @@ app.get('/api/system/status', async (_req, res) => {
     regionalStatus: 'full' as 'full' | 'partial' | 'restricted',
     websocketStatus: 'connected' as 'connected' | 'disconnected',
     apiKeys: settings.apiKeys.configured ? 'configured' as const : 'missing' as const,
-    region: 'Desconhecido',
+    region: 'Global',
     restrictions: [] as string[],
     connectivity: false,
   };
@@ -198,7 +243,7 @@ app.get('/api/system/status', async (_req, res) => {
       status.regionalStatus = 'partial';
     }
   } catch (error) {
-    logger.warn('Falha ao consultar preços para verificação de conectividade.', { error });
+    logger.warn('Falha ao consultar preï¿½os para verificaï¿½ï¿½o de conectividade.', { error });
     status.regionalStatus = 'partial';
   }
 
@@ -226,13 +271,13 @@ app.put('/api/settings', (req, res) => {
     const updated = updateSettings({ tradingParams, aiSettings, riskSettings });
     res.json({ settings: updated });
   } catch (error) {
-    logger.error('Falha ao atualizar configurações.', { error });
-    res.status(500).json({ error: 'Não foi possível atualizar as configurações.' });
+    logger.error('Falha ao atualizar configuraï¿½ï¿½es.', { error });
+    res.status(500).json({ error: 'Nï¿½o foi possï¿½vel atualizar as configuraï¿½ï¿½es.' });
   }
 });
 
 app.post('/api/settings/api-keys', (req, res) => {
-  const { action, apiKey, apiSecret, testnet } = req.body ?? {};
+  const { action, apiKey, apiSecret, testnet, mode } = req.body ?? {};
 
   try {
     if (action === 'save') {
@@ -241,10 +286,13 @@ app.post('/api/settings/api-keys', (req, res) => {
         return;
       }
 
+      const normalizedMode = typeof mode === 'string' ? mode : 'futures';
+
       const settings = saveApiKeys({
         apiKey,
         apiSecret,
         testnet: Boolean(testnet),
+        mode: normalizedMode === 'spot' ? 'spot' : 'futures',
       });
 
       res.json({ settings });
@@ -262,10 +310,10 @@ app.post('/api/settings/api-keys', (req, res) => {
       return;
     }
 
-    res.status(400).json({ error: 'Ação inválida.' });
+    res.status(400).json({ error: 'Aï¿½ï¿½o invï¿½lida.' });
   } catch (error) {
     logger.error('Falha ao processar API keys.', { error });
-    res.status(500).json({ error: 'Não foi possível processar as chaves de API.' });
+    res.status(500).json({ error: 'Nï¿½o foi possï¿½vel processar as chaves de API.' });
   }
 });
 
@@ -287,6 +335,19 @@ process.on('SIGINT', async () => {
     process.exit(0);
   });
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

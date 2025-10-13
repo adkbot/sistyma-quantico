@@ -59,6 +59,7 @@ export function saveStore(store) {
 
 export function upsertUserKeys(userId, data) {
   const store = loadStore();
+  store.users = store.users || {};
   store.users[userId] = {
     apiKey: data.apiKey,
     apiSecret: data.apiSecret,
@@ -69,19 +70,38 @@ export function upsertUserKeys(userId, data) {
   saveStore(store);
 }
 
+export function removeUserKeys(userId) {
+  const store = loadStore();
+  const users = store.users || {};
+  if (users[userId]) {
+    delete users[userId];
+    store.users = users;
+    saveStore(store);
+  }
+}
+
 export function getUserKeys(userId) {
   const store = loadStore();
-  return store.users[userId] || null;
+  const users = store.users || {};
+  return users[userId] || null;
 }
 
 export function getMaskedState(userId) {
   const k = getUserKeys(userId);
-  if (!k) return { configured: false };
+  if (!k) {
+    return {
+      configured: false,
+      mode: 'futures',
+      testnet: false,
+      apiKeyMask: '',
+      updatedAt: null,
+    };
+  }
   return {
     configured: true,
-    mode: k.mode,
-    testnet: k.testnet,
+    mode: k.mode || 'futures',
+    testnet: Boolean(k.testnet),
     apiKeyMask: k.apiKey ? `${k.apiKey.slice(0, 6)}***${k.apiKey.slice(-4)}` : '',
-    updatedAt: k.updatedAt,
+    updatedAt: k.updatedAt ?? null,
   };
 }

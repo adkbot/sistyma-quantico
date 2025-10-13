@@ -1,22 +1,29 @@
 // src/logic/calculation.ts
 
-import type { TradeParams } from '../types';
+import type { TradeParams } from '@/shared/types';
 
 /**
- * Calcula o lucro líquido de uma operação de arbitragem, considerando as taxas.
+ * Calcula o lucro lï¿½quido de uma operaï¿½ï¿½o de arbitragem, considerando as taxas.
  */
-export function calculateProfit({ buyPrice, sellPrice, amount, feePercentage }: TradeParams): number {
-  if (buyPrice <= 0 || sellPrice <= 0 || amount <= 0) {
+export function calculateProfit({ spread, amount, feePercentage, sellPrice, buyPrice }: TradeParams): number {
+  if (!Number.isFinite(spread) || amount <= 0 || sellPrice <= 0 || buyPrice <= 0) {
     return 0;
   }
 
-  const totalBuyCost = buyPrice * amount;
-  const totalSellValue = sellPrice * amount;
+  const gross = Math.abs(spread) * amount;
+  // Taxas aplicadas em ambos os lados da operaÃ§Ã£o
+  const buyFees = buyPrice * amount * feePercentage;
+  const sellFees = sellPrice * amount * feePercentage;
+  const totalFees = buyFees + sellFees;
 
-  // A taxa é geralmente cobrada sobre o valor total da transação
-  const sellFee = totalSellValue * feePercentage;
-
-  const netProfit = totalSellValue - totalBuyCost - sellFee;
-
-  return netProfit;
+  return gross - totalFees;
 }
+
+
+
+
+
+
+
+
+

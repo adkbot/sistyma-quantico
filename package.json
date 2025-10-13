@@ -11,6 +11,7 @@
     "preview": "vite preview --port 8083",
     "test": "jest",
     "backend": "tsx src/server.ts",
+    "adapter": "node src/adapter.mjs",
     "start": "node dist/server.js"
   },
   "dependencies": {

@@ -2,5 +2,27 @@
   "tradingPair": "BTCUSDT",
   "minProfitPercentage": 0.05,
   "exchangeFeePercentage": 0.001,
-  "checkIntervalSeconds": 5
+  "checkIntervalSeconds": 2,
+  "placeOrders": false,
+  "allowReverse": true,
+  "spotMarginEnabled": true,
+  "feesBps": {
+    "spotTaker": 10,
+    "futuresTaker": 4
+  },
+  "slippageBpsPerLeg": 3,
+  "minSpreadBpsLongCarry": 3,
+  "minSpreadBpsReverse": 3,
+  "considerFunding": true,
+  "fundingHorizonHours": 8,
+  "maxBorrowAprPct": 15,
+  "enableTriangular": true,
+  "triMinQuoteVolumeUSDT": 50000,
+  "triMinProfitBps": 3,
+  "spotFuturesMinProfitBps": 3,
+  "multiPairScanEnabled": true,
+  "spotFuturesMinQuoteVolumeUSDT": 50000,
+  "spotFuturesMaxSymbols": 100,
+  "triBudgetUseDynamic": true,
+  "triBudgetFixedUSDT": 0
 }

@@ -24,14 +24,8 @@ interface TradeHistoryProps {
 }
 
 const TradeHistory: React.FC<TradeHistoryProps> = ({ trades }) => {
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('pt-BR', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-  };
+  // Exibir valores apenas em USDT
+  const formatUSDT = (value: number) => `${value.toFixed(2)} USDT`;
 
   const formatPercent = (value: number) => {
     return `${value >= 0 ? '+' : ''}${value.toFixed(3)}%`;
@@ -84,7 +78,7 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({ trades }) => {
                 <div>
                   <p className="text-sm text-muted-foreground">P&L Total</p>
                   <p className="text-2xl font-bold text-accent">
-                    {formatCurrency(trades.reduce((sum, trade) => sum + trade.pnl, 0))}
+                    {formatUSDT(trades.reduce((sum, trade) => sum + trade.pnl, 0))}
                   </p>
                 </div>
                 <DollarSign className="h-8 w-8 text-accent" />
@@ -160,7 +154,7 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({ trades }) => {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono">
-                        {formatCurrency(trade.volume)}
+                        {formatUSDT(trade.volume)}
                       </TableCell>
                       <TableCell>
                         <div className={`flex items-center ${
@@ -172,12 +166,12 @@ const TradeHistory: React.FC<TradeHistoryProps> = ({ trades }) => {
                             <TrendingDown className="h-4 w-4 mr-1" />
                           )}
                           <span className="font-mono">
-                            {formatCurrency(trade.pnl)}
+                            {formatUSDT(trade.pnl)}
                           </span>
                         </div>
                       </TableCell>
                       <TableCell className="font-mono text-sm text-muted-foreground">
-                        {formatCurrency(trade.fees)}
+                        {formatUSDT(trade.fees)}
                       </TableCell>
                       <TableCell className="font-mono text-sm">
                         {formatPercent(trade.slippage)}

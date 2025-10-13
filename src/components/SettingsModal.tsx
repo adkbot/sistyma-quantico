@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  onAiEnabledChange?: (enabled: boolean) => void;
 }
 
 interface ApiKeyState {
@@ -29,7 +30,7 @@ interface ApiKeyState {
   updatedAt: string | null;
 }
 
-const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
+const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onAiEnabledChange }) => {
   const { toast } = useToast();
   const [apiKeys, setApiKeys] = useState<ApiKeyState>({
     binanceKey: "",
@@ -113,6 +114,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
           setAiSettings(settings.aiSettings);
 
           setRiskSettings(settings.riskSettings);
+
+          // Notifica consumidor externo sobre o estado atual da IA
+          onAiEnabledChange?.(Boolean(settings.aiSettings?.enabled));
 
         } else {
 
@@ -203,7 +207,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
           riskSettings,
         })
         .catch((err) => {
-          console.error('Erro ao salvar configurações', err);
+          console.error('Erro ao salvar configuraï¿½ï¿½es', err);
         });
     }, 500);
 
@@ -263,8 +267,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         <DialogHeader>
           <DialogTitle className="text-2xl font-bold text-quantum flex items-center">
             <Settings className="mr-2 h-6 w-6" />
-            Configurações do Sistema
+            Configuraï¿½ï¿½es do Sistema
           </DialogTitle>
+          <DialogDescription className="text-muted-foreground">Gerencie credenciais da Binance e parï¿½metros operacionais.</DialogDescription>
         </DialogHeader>
 
         <Tabs defaultValue="api" className="w-full">
@@ -299,8 +304,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 <Alert>
                   <AlertTriangle className="h-4 w-4" />
                   <AlertDescription>
-                    Armazenamos suas chaves da Binance localmente no servidor (.env). Elas são usadas apenas para sincronizar
-                    saldos e enviar ordens autorizadas por você.
+                    Armazenamos suas chaves da Binance localmente no servidor (.env). Elas sï¿½o usadas apenas para sincronizar
+                    saldos e enviar ordens autorizadas por vocï¿½.
                   </AlertDescription>
                 </Alert>
 
@@ -357,7 +362,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     <div className="w-2 h-2 rounded-full bg-accent mr-2" />
                     {apiKeys.configured ? "Binance conectada" : "Conexao pendente"}
                   </Badge>
-                  <Badge variant="outline">Proteção via controle de acesso local</Badge>
+                  <Badge variant="outline">Proteï¿½ï¿½o via controle de acesso local</Badge>
                 </div>
 
                 <div className="flex justify-end gap-2 pt-6">
@@ -384,13 +389,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Zap className="mr-2 h-5 w-5 text-secondary" />
-                  Parâmetros de Trading
+                  Parï¿½metros de Trading
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <Label htmlFor="min-spread">Spread Mínimo (%)</Label>
+                    <Label htmlFor="min-spread">Spread Mï¿½nimo (%)</Label>
                     <Input
                       id="min-spread"
                       type="number"
@@ -399,12 +404,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                       onChange={(e) => setTradingParams((prev) => ({ ...prev, minSpread: parseFloat(e.target.value) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Spread mínimo para considerar uma operação.
+                      Spread mï¿½nimo para considerar uma operaï¿½ï¿½o.
                     </p>
                   </div>
 
                   <div>
-                    <Label htmlFor="max-position">Posição Máxima (USD)</Label>
+                    <Label htmlFor="max-position">Posiï¿½ï¿½o Mï¿½xima (USDT)</Label>
                     <Input
                       id="max-position"
                       type="number"
@@ -412,7 +417,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                       onChange={(e) => setTradingParams((prev) => ({ ...prev, maxPosition: parseInt(e.target.value || "0", 10) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Valor máximo por operação.
+                      Valor mï¿½ximo por operaï¿½ï¿½o.
                     </p>
                   </div>
 
@@ -426,12 +431,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                       onChange={(e) => setTradingParams((prev) => ({ ...prev, stopLoss: parseFloat(e.target.value) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Perda máxima aceitável por operação.
+                      Perda mï¿½xima aceitï¿½vel por operaï¿½ï¿½o.
                     </p>
                   </div>
 
                   <div>
-                    <Label htmlFor="timeout">Timeout de Posição (s)</Label>
+                    <Label htmlFor="timeout">Timeout de Posiï¿½ï¿½o (s)</Label>
                     <Input
                       id="timeout"
                       type="number"
@@ -439,7 +444,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                       onChange={(e) => setTradingParams((prev) => ({ ...prev, timeout: parseInt(e.target.value || "0", 10) }))}
                     />
                     <p className="text-xs text-muted-foreground mt-1">
-                      Tempo máximo de exposição por operação.
+                      Tempo mï¿½ximo de exposiï¿½ï¿½o por operaï¿½ï¿½o.
                     </p>
                   </div>
                 </div>
@@ -452,7 +457,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Brain className="mr-2 h-5 w-5 text-primary" />
-                  Parâmetros de IA
+                  Parï¿½metros de IA
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -460,12 +465,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                   <div>
                     <p className="font-medium">IA Ativa</p>
                     <p className="text-sm text-muted-foreground">
-                      Permite que o motor de IA ajuste dinamicamente estratégias.
+                      Permite que o motor de IA ajuste dinamicamente estratï¿½gias.
                     </p>
                   </div>
                   <Switch
                     checked={aiSettings.enabled}
-                    onCheckedChange={(checked) => setAiSettings((prev) => ({ ...prev, enabled: checked }))}
+                    onCheckedChange={(checked) => {
+                      setAiSettings((prev) => ({ ...prev, enabled: checked }));
+                      onAiEnabledChange?.(Boolean(checked));
+                    }}
                   />
                 </div>
 
@@ -483,7 +491,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="confidence">Confiança mínima (%)</Label>
+                    <Label htmlFor="confidence">Confianï¿½a mï¿½nima (%)</Label>
                     <Input
                       id="confidence"
                       type="number"
@@ -495,7 +503,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 
                 <div className="flex items-center justify-between rounded-md border p-4">
                   <div>
-                    <p className="font-medium">Re-treinamento automático</p>
+                    <p className="font-medium">Re-treinamento automï¿½tico</p>
                     <p className="text-sm text-muted-foreground">
                       Atualiza o modelo sempre que novos dados suficientes forem coletados.
                     </p>
@@ -514,13 +522,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <Shield className="mr-2 h-5 w-5 text-secondary" />
-                  Gestão de Risco
+                  Gestï¿½o de Risco
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label htmlFor="max-daily-loss">Perda diária máxima (USD)</Label>
+                    <Label htmlFor="max-daily-loss">Perda diï¿½ria mï¿½xima (USDT)</Label>
                     <Input
                       id="max-daily-loss"
                       type="number"
@@ -529,7 +537,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="max-concurrent">Trades simultâneos</Label>
+                    <Label htmlFor="max-concurrent">Trades simultï¿½neos</Label>
                     <Input
                       id="max-concurrent"
                       type="number"
@@ -543,7 +551,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 
                 <div className="flex items-center justify-between rounded-md border p-4">
                   <div>
-                    <p className="font-medium">Emergência</p>
+                    <p className="font-medium">Emergï¿½ncia</p>
                     <p className="text-sm text-muted-foreground">Desativa o sistema se os limites forem violados.</p>
                   </div>
                   <Switch
@@ -561,6 +569,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 };
 
 export default SettingsModal;
+
 
 
 

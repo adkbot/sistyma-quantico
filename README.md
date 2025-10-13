@@ -1,6 +1,7 @@
 # Sistyma Quantico (Synapse-Arbitrage Mind)
 [![CI](https://github.com/adkbot/sistyma-quantico/actions/workflows/ci.yml/badge.svg)](https://github.com/adkbot/sistyma-quantico/actions/workflows/ci.yml)
 [![Latest Release](https://img.shields.io/github/v/release/adkbot/sistyma-quantico?sort=semver)](https://github.com/adkbot/sistyma-quantico/releases)
+[![Downloads](https://img.shields.io/github/downloads/adkbot/sistyma-quantico/latest/total)](https://github.com/adkbot/sistyma-quantico/releases/latest)
 
 Aplicação completa para monitorar e operar arbitragem (spot vs futures e triangular) com painel em React + Tailwind e backend em Node/Express. Inclui testes com Jest, integração com Binance via `ccxt`, armazenamento seguro de chaves e SSE para streaming de estado em tempo real.
 

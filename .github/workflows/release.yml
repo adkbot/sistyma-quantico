@@ -35,13 +35,21 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Build backend (tsc)
+        run: npm run build:server
+
       - name: Zip dist
         run: zip -r dist.zip dist
+
+      - name: Zip dist-server
+        run: zip -r dist-server.zip dist-server
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: |
             dist.zip
+            dist-server.zip
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

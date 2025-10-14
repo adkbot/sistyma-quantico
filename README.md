@@ -81,16 +81,16 @@ npm test
 ```
 
 ## Build
-Gera os artefatos do frontend em `dist/`:
+Gera os artefatos do frontend em `dist/` e do backend em `dist-server/`:
 ```sh
 npm run build
+npm run build:server
 ```
 
 ## Deploy (base)
 - Frontend: sirva o conteúdo de `dist/` em um servidor estático (Nginx, Vercel, etc.).
-- Backend: execute `npm run backend` (dev) ou compile para JS antes de produção. Alternativas:
-  - Rodar com `tsx` em produção (simples, suficiente para POC);
-  - Adicionar bundler/compilação (ex.: `tsc` ou `tsup`) para gerar `dist/server.js` e usar `npm start`.
+- Backend: execute `npm run backend` (dev) ou compile para JS antes de produção.
+  - Em produção, utilize `npm run build:server` e rode com `npm start` (usa `dist-server/server.js`).
 - Coloque um proxy reverso (Nginx/Traefik) com TLS e libere apenas o necessário.
 
 ## CI (GitHub Actions)
@@ -102,7 +102,9 @@ O repositório inclui um workflow básico para:
 Badge de status acima. Você pode acessar os detalhes em Actions.
 
 ## Releases
-Cada tag no formato `vX.Y.Z` dispara um workflow de release que compila o frontend e publica um artefato `dist.zip` anexado à Release.
+Cada tag no formato `vX.Y.Z` dispara um workflow de release que compila frontend e backend e publica artefatos:
+- `dist.zip` (frontend)
+- `dist-server.zip` (backend)
 Para criar uma release:
 ```sh
 git tag v1.0.0

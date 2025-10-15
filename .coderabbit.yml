@@ -1,0 +1,30 @@
+﻿version: 1
+review:
+  auto_review: true
+  summarize_changes: true
+  require_changes: false
+  enable_inline_suggestions: true
+  paths:
+    include:
+      - "src/**"
+      - "public/**"
+      - "supabase/**"
+      - "package*.json"
+      - "vite.config.*"
+      - "tsconfig*.json"
+      - "README.md"
+  rules:
+    - name: Segurança
+      details: >
+        Proibir secrets no repo; apontar vazamentos; validar uso de envs.
+    - name: Performance
+      details: >
+        Evitar renders desnecessários; imports pesados; loops custosos.
+    - name: Qualidade/Boas práticas
+      details: >
+        Tipos corretos em TS; evitar any; modularização; nomes claros; dead code.
+    - name: Acessibilidade/UI
+      details: >
+        Semântica HTML; aria-*; foco/teclado; contraste.
+  suggestions:
+    batch_apply: true

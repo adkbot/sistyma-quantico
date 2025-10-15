@@ -57,7 +57,7 @@ app.post('/api/keys', (req, res) => {
     return mode === 'spot' ? 'spot' : 'futures';
   })();
 
-  upsertUserKeys(DEFAULT_USER_ID, { apiKey, apiSecret, mode: normalizedMode, testnet: Boolean(testnet) });
+  upsertUserKeys(DEFAULT_USER_ID, { apiKey, secretKey: apiSecret, mode: normalizedMode, testnet: Boolean(testnet) });
   res.json({ ok: true, state: getMaskedState(DEFAULT_USER_ID) });
 });
 
@@ -230,7 +230,7 @@ app.get('/api/system/status', async (_req, res) => {
     binanceConnection: 'disconnected' as 'connected' | 'disconnected' | 'error',
     regionalStatus: 'full' as 'full' | 'partial' | 'restricted',
     websocketStatus: 'connected' as 'connected' | 'disconnected',
-    apiKeys: settings.apiKeys.configured ? 'configured' as const : 'missing' as const,
+    apiKeys: settings.apiKeys.configured ? 'configured' as 'configured' | 'missing' | 'invalid' : 'missing' as 'configured' | 'missing' | 'invalid',
     region: 'Global',
     restrictions: [] as string[],
     connectivity: false,

@@ -5,11 +5,11 @@ export function makeBinance() {
   const user = getUserKeys('default');
   if (!user) return null;
 
-  const isFutures = user.mode === 'futures' || user.mode === 'future';
+  const isFutures = user.mode === 'futures';
 
   const exchange = new ccxt.binance({
     apiKey: user.apiKey,
-    secret: user.apiSecret,
+    secret: user.secretKey,
     enableRateLimit: true,
     options: { defaultType: isFutures ? 'future' : 'spot' },
   });

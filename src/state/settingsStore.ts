@@ -237,7 +237,7 @@ export function updateSettings(partial: Partial<Omit<SettingsState, 'apiKeys'>>)
 export function saveApiKeys(params: { apiKey: string; apiSecret: string; testnet: boolean; mode?: 'spot' | 'futures' }): SettingsState {
   upsertUserKeys('default', {
     apiKey: params.apiKey,
-    apiSecret: params.apiSecret,
+    secretKey: params.apiSecret,
     testnet: params.testnet,
     mode: params.mode || 'futures',
   });

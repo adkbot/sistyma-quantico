@@ -12,7 +12,12 @@
     "outDir": "dist-server",
     "rootDir": "src",
     "sourceMap": false,
-    "noEmit": false
+    "noEmit": false,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/shared/types": ["src/types/api.ts"]
+    }
   },
   "include": [
     "src/**/*.ts"
@@ -22,6 +27,7 @@
     "src/App.tsx",
     "src/main.tsx",
     "src/pages/**",
-    "src/components/**"
+    "src/components/**",
+    "src/hooks/**"
   ]
 }

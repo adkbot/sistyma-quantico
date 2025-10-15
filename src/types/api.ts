@@ -7,11 +7,27 @@ export interface ApiBotBalance {
   total_balance: number;
 }
 
+export type Side = 'LONG_SPOT_SHORT_PERP' | 'SHORT_SPOT_LONG_PERP' | 'NONE';
+
+export interface FeesBpsConfig {
+  spotTaker: number;
+  futuresTaker: number;
+}
+
+export type TradeParams = {
+  buyPrice: number;
+  sellPrice: number;
+  amount: number;
+  feePercentage: number;
+  spread: number;
+  side: Exclude<Side, 'NONE'>;
+};
+
 export interface ApiBotTrade {
   id: string;
   timestamp: string;
   pair: string;
-  type: 'LONG_SPOT_SHORT_PERP' | 'SHORT_SPOT_LONG_PERP';
+  type: 'spot-futures' | 'futures-spot';
   direction: 'LONG_SPOT_SHORT_PERP' | 'SHORT_SPOT_LONG_PERP';
   spread: number;
   entryPrice: number;

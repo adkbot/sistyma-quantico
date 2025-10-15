@@ -109,7 +109,7 @@ function getBinanceContext(): BinanceContext {
   const normalizedMode: BinanceMode = keys.mode === 'spot' ? 'spot' : 'futures';
   const signature = makeSignature({
     apiKey: keys.apiKey,
-    apiSecret: keys.apiSecret,
+    apiSecret: keys.secretKey,
     mode: normalizedMode,
     testnet: Boolean(keys.testnet)
   });
@@ -124,7 +124,7 @@ function getBinanceContext(): BinanceContext {
   cachedContext = {
     simulation: false,
     apiKey: keys.apiKey,
-    apiSecret: keys.apiSecret,
+    apiSecret: keys.secretKey,
     testnet: Boolean(keys.testnet),
     mode: normalizedMode,
     spotClient: createHttpClient(spotBase, keys.apiKey),

@@ -101,6 +101,11 @@ O repositório inclui um workflow básico para:
 
 Badge de status acima. Você pode acessar os detalhes em Actions.
 
+## Variáveis de Ambiente Adicionais
+- `SUPABASE_SERVICE_ROLE_KEY` — service role key used by Edge Functions (never expose this in the client).
+- `LAEVITAS_API_KEY` — API key for Laevitas GEX analytics (kept server-side only).
+- `BINANCE_API_KEY`/`BINANCE_SECRET_KEY` são armazenadas por usuário via função `api-keys` e não precisam ser declaradas globalmente.
+
 ## Releases
 Cada tag no formato `vX.Y.Z` dispara um workflow de release que compila frontend e backend e publica artefatos:
 - `dist.zip` (frontend)
@@ -108,7 +113,7 @@ Cada tag no formato `vX.Y.Z` dispara um workflow de release que compila frontend
 Para criar uma release:
 ```sh
 git tag v1.0.0
-git push quantico v1.0.0
+git push origin v1.0.0
 ```
 
 ## Segurança

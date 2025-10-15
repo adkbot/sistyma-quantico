@@ -131,7 +131,7 @@ class BotState {
       id: randomUUID(),
       timestamp: new Date().toISOString(),
       pair,
-      type: trade.side,
+      type: trade.side === 'LONG_SPOT_SHORT_PERP' ? 'spot-futures' : 'futures-spot',
       direction: trade.side,
       spread: trade.spread,
       entryPrice: trade.buyPrice,

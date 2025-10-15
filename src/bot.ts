@@ -396,7 +396,7 @@ async function botLoop(config: BotConfig, signal: AbortSignal): Promise<void> {
 
         const [updatedFut, updatedSpot] = await Promise.all([getFuturesTotalUSDT(), getSpotPortfolioValueUSDT()]);
         botState.updateBalances(updatedSpot, updatedFut, prices.spot);
-        logger.info('Saldo atualizado apos execucao.', { updatedBalance });
+        logger.info('Saldo atualizado apos execucao.', { updatedFut, updatedSpot });
       } else {
         logger.warn('Execucao retornou sem sucesso. Verifique o retorno da corretora.', result.details);
       }
@@ -415,6 +415,8 @@ async function botLoop(config: BotConfig, signal: AbortSignal): Promise<void> {
     // Escaneamento Spot-Futuros multi-par com volume alto
     if (config.multiPairScanEnabled) {
       try {
+        const multiPairCapital = await getFuturesTotalUSDT();
+        
         const [spotInfo, tickers, futInfo] = await Promise.all([
           getSpotExchangeInfo(),
           getSpotTickers24h(),
@@ -479,7 +481,7 @@ async function botLoop(config: BotConfig, signal: AbortSignal): Promise<void> {
           // Oportunidade encontrada no escaneamento multi-par
           botState.setMessage(`Oportunidade spot-futuros detectada • ${s.symbol} • lado=${sDec} • net_bps=${netEdge.toFixed(2)}`);
 
-          const qty = capital / p.spot;
+          const qty = multiPairCapital / p.spot;
           if (!Number.isFinite(qty) || qty <= 0) continue;
 
           const trade: TradeParams = sDec === 'LONG_SPOT_SHORT_PERP'
